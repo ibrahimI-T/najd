@@ -96,3 +96,37 @@ test('the latest-release reader takes only a published x.y.z tag',async()=>{
   await assert.rejects(fetchLatestVersion('u',reply({},404)),{code:'UPDATE_NOT_PUBLISHED'})
   await assert.rejects(fetchLatestVersion('u',reply({},500)),{code:'UPDATE_UNAVAILABLE'})
 })
+test('releases go to the new repository and to the one older installations still read (C66-01, C66-02)',()=>{
+  const config=require('../electron/update-config.json'),source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../scripts/publish-release.cjs'),'utf8')
+  assert.equal(config.repo,'najd');assert.deepEqual(config.legacyRepos,['najd-agent-releases'])
+  assert.match(source,/const targets=\[config\.repo,\.\.\.\(config\.legacyRepos\|\|\[\]\)\]/)
+  assert.match(source,/path='\+config\.owner\+'\/'\+config\.repo\+'\.git/);assert.doesNotMatch(source,/najd-agent\.git/)
+})
+test('a publisher retry skips only repositories holding the exact release bytes, and creates a new repository last (C67-01, C68-01, C68-02)',()=>{
+  const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../scripts/publish-release.cjs'),'utf8')
+  assert.match(source,/if\(existing\.draft \|\| !names\.every\(name=>existing\.assets\?\.some\(asset=>asset\.name===name&&asset\.state==='uploaded'&&asset\.digest===digests\[name\]\)\)\)throw/)
+  assert.doesNotMatch(source,/asset\.size===/)
+  assert.match(source,/console\.log\('Already published to '\+target\);continue/)
+  assert.ok(source.indexOf("api('/user/repos','POST'")>source.lastIndexOf('checked.push({target,repo})'))
+  // C69: hashing streams the file, and each upload is compared with the hashed bytes before the release goes public
+  assert.doesNotMatch(source,/fs\.readFile\(path\.join\(directory,name\)\)/)
+  assert.match(source,/if\(asset\?\.digest!==digests\[name\]\)throw/)
+  assert.ok(source.indexOf('asset?.digest!==digests[name]')<source.indexOf("{draft:false,make_latest:'true'}"))
+  // C70-01: the artifacts are copied to a private folder first; verification, hashing and upload all read the copy
+  const copy=source.indexOf('await fs.copyFile(path.join(output,name),path.join(directory,name))')
+  assert.ok(copy>0&&copy<source.indexOf('await verifyInstaller(path.join(directory,record.file.name),record)'))
+  assert.ok(copy<source.indexOf('digests[name]=await sha256(path.join(directory,name))'))
+  assert.match(source,/if\(JSON\.stringify\(verifyManifest\(raw,config\)\)!==JSON\.stringify\(record\)\)throw/)
+})
+test('the publisher removes its private copy on success and failure (C71-01)',()=>{
+  const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../scripts/publish-release.cjs'),'utf8')
+  assert.match(source,/const directory=staging=await fs\.mkdtemp/)
+  assert.match(source,/\.finally\(\(\)=>staging&&fs\.rm\(staging,\{recursive:true,force:true\}\)\)/)
+  // C72-01: an interrupted run removes its copy, and a killed run's copy is swept at the next start
+  assert.match(source,/for\(const signal of \['SIGINT','SIGTERM'\]\)process\.once\(signal,\(\)=>\{if\(staging\)require\('node:fs'\)\.rmSync\(staging/)
+  assert.match(source,/\/\^najd-publish-\[A-Za-z0-9\]\{6\}\$\//)
+  // C73-01: the sweep runs after the flag check and removes only folders holding the publisher's marker file
+  assert.ok(source.indexOf("Explicit publish flag required")<source.indexOf('fs.readdir(temp'))
+  assert.match(source,/if\(mark\?\.isFile\(\)\)await fs\.rm/)
+  assert.ok(source.indexOf('await fs.writeFile(path.join(directory,STAGING_MARK)')>source.indexOf('const directory=staging=await fs.mkdtemp'))
+})

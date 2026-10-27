@@ -2,6 +2,9 @@
   "channel": "main",
   "owner": "ibrahimI-T",
   "repo": "najd",
+  "legacyRepos": [
+    "najd-agent-releases"
+  ],
   "runtimeRepo": "najd-agent-releases",
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAZJ6/lstE7mu4HqRubzONRbuLUczYiz0wwPkKSZlK7NM=\n-----END PUBLIC KEY-----\n"
 }
