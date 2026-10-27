@@ -59,3 +59,20 @@ Verification: npm.cmd run notices reads six full license files and fails if one 
 ## 0.6.0 updater distribution (2026-10-16)
 
 Pinned electron-updater 6.8.9 (MIT, original electron-builder authors) and complete installed production closure: 22 renderer/main runtime packages. generate-notices.cjs now walks exact installed production dependencies and retains full license/notice texts in the shipped notices. lazy-val 1.0.5 declares MIT/Vladimir Krivosheev in npm metadata but upstream/tarball omit a standalone notice; docs/third-party-notices/lazy-val-1.0.5-NOTICE.txt transparently records that provenance and the standard declared terms without fabricating an original copyright notice. Existing upstream/Chromium/Electron attribution remains. Production npm audit reports zero advisories; the older build-only advisory baseline remains separate. No newly managed engine payload/model is redistributed in this development installer.
+
+## Design skill packs (2026-10-28)
+
+Shipped under resources/skill-packs, vendored byte for byte at pinned commits by scripts/vendor-skill-packs.cjs
+(skill-packs/manifest.json records every file's SHA-256; `node scripts/vendor-skill-packs.cjs --check` verifies them).
+Each pack keeps its LICENSE (and NOTICE where present) beside it, and the texts are added to THIRD-PARTY-NOTICES.txt.
+
+| Pack | Source and pin | License |
+|---|---|---|
+| Taste Skill | Leonxlnx/taste-skill @ 12af471f627f866411b4bd785b19646d3672784c (skills/taste-skill) | MIT |
+| Impeccable | pbakaus/impeccable @ d34c87e1a00989ae8dbdd7f6b30b70f23319e860 (.agents/skills/impeccable) | Apache-2.0, NOTICE.md kept |
+| GSAP Skills | greensock/gsap-skills @ aed9cfd3277740755f6bfc1155c7aa645403b760 (skills) | MIT |
+| Playwright CLI skill | microsoft/playwright-cli @ b1a5903c5b633b8c9f843ad7b629c2a78437040c (skills/playwright-cli) | Apache-2.0 |
+| Designlang skill | Manavarya09/design-extract @ d2c28da8aae3098a7f7dc02fb4355f3f803edb6c (skills/extract-design) | MIT |
+
+Not shipped: React Bits (MIT + Commons Clause) and Transitions.dev (own license) forbid redistributing the libraries
+themselves. The web builder guide fetches them into the user's own project when used, which both licenses allow.

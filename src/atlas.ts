@@ -85,7 +85,7 @@ export function buildAtlas(input: AtlasInput, language: 'ar' | 'en'): AtlasItem[
       id: 'skill:' + skill.id, kind: 'skill', name: skill.name, description: skill.description,
       status: !skill.enabled ? 'off' : skill.compatibility === 'needs-runtime' ? 'needs-setup' : 'guide',
       reason: !skill.enabled ? 'DISABLED' : skill.compatibility === 'needs-runtime' ? 'NEEDS_RUNTIME' : null,
-      source: skill.source + (skill.license ? ' · ' + skill.license : ''), version: skill.sourceRevision ? skill.sourceRevision.slice(0, 8) : null,
+      source: (skill.source === 'pack' && skill.author ? skill.author : skill.source) + (skill.license ? ' · ' + skill.license : ''), version: skill.sourceRevision ? skill.sourceRevision.slice(0, 8) : null,
       permissions: ['guidance'], group: skill.builtIn ? 'builtin' : 'imported', page: 'skills'
     })
   }

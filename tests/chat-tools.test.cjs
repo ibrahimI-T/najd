@@ -140,8 +140,8 @@ test('a skill is read in pages of at least 6000 characters, from the start when 
   const reads = []
   const runtime = createAgentRuntime({ catalog: { search: async () => [], details: async () => ({}), summary: async () => '' }, library: { list: async () => [] },
     skills: { read: async (id, offset, limit) => { reads.push([id, offset, limit]); return { id, text: 'guide', hasMore: false } }, list: async () => [] } })
-  const steps = [{ kind: 'agent-tools', calls: [{ name: 'najd_skills_read', arguments: JSON.stringify({ id: 'najd-office-design', offset: -5, limit: 800 }), call_id: 'c1' }], items: [] },
-    { kind: 'agent-tools', calls: [{ name: 'najd_skills_read', arguments: JSON.stringify({ id: 'najd-office-design', offset: 6000, limit: 99999 }), call_id: 'c2' }], items: [] },
+  const steps = [{ kind: 'agent-tools', calls: [{ name: 'najd_skills_read', arguments: JSON.stringify({ id: 'najd-office-design', file: '', offset: -5, limit: 800 }), call_id: 'c1' }], items: [] },
+    { kind: 'agent-tools', calls: [{ name: 'najd_skills_read', arguments: JSON.stringify({ id: 'najd-office-design', file: '', offset: 6000, limit: 99999 }), call_id: 'c2' }], items: [] },
     { kind: 'message', text: 'ok' }]
   await runtime.run({ request: { text: 'make a deck', skillId: 'najd-office-design' }, respond: async () => steps.shift() })
   assert.deepEqual(reads, [['najd-office-design', 0, 6000], ['najd-office-design', 6000, 8000]])

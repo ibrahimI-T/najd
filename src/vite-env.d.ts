@@ -389,7 +389,7 @@ type NajdCapabilityId = 'najd-read-document' | 'najd-find-documents' | 'najd-lis
 interface NajdInstructionSkill {
   id: string; name: string; description: string; source: string
   external?: boolean; compatibility?: 'instructions-only' | 'needs-runtime' | 'platform-mismatch'; note?: string; sourceUrl?: string
-  sourceRevision: string | null; relativePath: string; digest: string; license: string; builtIn?: boolean
+  sourceRevision: string | null; relativePath: string; digest: string; license: string; builtIn?: boolean; author?: string | null
   platforms: string[] | null; enabled: boolean; mode: 'instructions'; dependenciesReady: false
 }
 interface NajdAccount { id: string; label: string; host: string; username: string; autoLogin: boolean; authorizedAt: string; lastUsedAt: string | null; unresolved?: boolean }

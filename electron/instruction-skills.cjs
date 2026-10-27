@@ -12,7 +12,7 @@ function createInstructionSkills({ filePath, bundle }) {
   for (const row of bundle.skills) {
     if (!row || typeof row.id !== 'string' || !/^[a-z][a-z0-9-]{2,79}$/.test(row.id) || skills.has(row.id) ||
         typeof row.body !== 'string' || Buffer.byteLength(row.body) > 65536 || digest(row.body) !== row.digest ||
-        !['hermes', 'openclaw', 'najd'].includes(row.source) || (row.source === 'najd' ? row.sourceRevision !== null : !/^[a-f0-9]{40}$/.test(row.sourceRevision)) ||
+        !['hermes', 'openclaw', 'najd', 'pack'].includes(row.source) || (row.source === 'najd' ? row.sourceRevision !== null : !/^[a-f0-9]{40}$/.test(row.sourceRevision)) ||
         typeof row.name !== 'string' || typeof row.relativePath !== 'string') throw fail('INCOMPATIBLE_RUNTIME')
     skills.set(row.id, structuredClone(row))
   }
@@ -42,19 +42,21 @@ function createInstructionSkills({ filePath, bundle }) {
     } catch (error) { if (error.code === 'ENOENT') return defaults(); throw fail('CAPABILITY_STORE_UNAVAILABLE') }
   }
   const definition = id => { const row = skills.get(id); if (!row) throw fail('INVALID_INPUT'); return row }
-  // NAJD's own guides (source "najd", M3-9) are built in and always on: guidance grants no tools or permissions.
-  const enabled = (state, row) => row.source === 'najd' || state.enabled[row.id] === row.digest
+  // NAJD's own guides (source "najd", M3-9) and the shipped design skill packs (source "pack") are built in and always on,
+  // so an upgrade from a profile saved before they existed has them too: guidance grants no tools or permissions.
+  const builtIn = row => row.source === 'najd' || row.source === 'pack'
+  const enabled = (state, row) => builtIn(row) || state.enabled[row.id] === row.digest
   return {
     list: async () => {
       await pending
       const state = await load()
-      return [...skills.values()].map(({ body, ...row }) => ({ ...row, enabled: enabled(state, row), mode: 'instructions', dependenciesReady: false, ...(row.source === 'najd' ? { builtIn: true } : {}) }))
+      return [...skills.values()].map(({ body, ...row }) => ({ ...row, enabled: enabled(state, row), mode: 'instructions', dependenciesReady: false, ...(builtIn(row) ? { builtIn: true } : {}) }))
     },
     setEnabled: (id, value) => {
       const operation = pending.then(async () => {
         const row = definition(id)
         if (typeof value !== 'boolean') throw fail('INVALID_INPUT')
-        if (row.source === 'najd') throw fail('BUILT_IN_GUIDE')
+        if (builtIn(row)) throw fail('BUILT_IN_GUIDE')
         const state = await load()
         if (value) state.enabled[id] = row.digest
         else delete state.enabled[id]

@@ -57,6 +57,8 @@ async function main() {
   for (const name of packages) await visit(name,root)
   const skillBundle = require('../electron/upstream-skills.json')
   notices.push(...skillBundle.notices)
+  // Design skill packs installed under resources/skill-packs, with their full license and notice texts.
+  notices.push(...require('../electron/skill-packs.cjs').createSkillPacks({ root: path.join(root, 'skill-packs') }).notices())
   notices.push(['Bundled NAJD runtime components', '='.repeat(60),
     'The installer includes these original components under resources/najd-runtime. Their complete original',
     'license and notice files are installed beside them and are not modified:',

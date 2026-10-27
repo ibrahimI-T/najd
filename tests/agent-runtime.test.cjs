@@ -19,7 +19,7 @@ test('enabled upstream instruction skills load on demand and do not authorize ex
     }
     assert.ok(request.tools.some(tool => tool.name === 'najd_skills_read'))
     assert.equal(request.tools.some(tool => tool.name === 'terminal'), false)
-    if (turn === 2) return call('najd_skills_read', { id: 'hermes-example', offset: 0, limit: 1000 }, 'load-skill')
+    if (turn === 2) return call('najd_skills_read', { id: 'hermes-example', file: '', offset: 0, limit: 1000 }, 'load-skill')
     assert.match(request.input.at(-1).output, /ORIGINAL UPSTREAM GUIDANCE/)
     return { kind: 'message', text: 'Guided answer' }
   } })

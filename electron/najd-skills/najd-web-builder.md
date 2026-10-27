@@ -55,6 +55,41 @@ Work like a product studio: a clear plan, real content, a distinctive design, an
    built and checked, with what is not verified. Offer hosting steps for Cloudflare Pages, Netlify, Vercel or GitHub
    Pages; publishing uses the user's own account and they sign in themselves - never ask for passwords or tokens.
 
+## Design and motion skills that ship with NAJD
+
+Open-source skill packs are built in (pinned versions, original licenses kept). Read the relevant guide with
+`najd_skills_read {id}` before that step; its answer lists the pack folder and files, and you read a listed reference
+with `najd_skills_read {id, file}`. Their scripts run with `node "<folder>/scripts/..."` through the command tools,
+with the working directory in the project (the user approves commands as usual).
+
+- `pack-taste-design-taste-frontend` (Taste Skill): art direction for a new site - read it at step 2 for the
+  design plan and use its anti-generic rules while building.
+- `pack-impeccable-impeccable` (Impeccable): design vocabulary and commands to critique, polish, typeset, layout,
+  colourize, animate and harden an interface - read it at step 6 for the review and fixes. On Windows its launcher is
+  `scripts\impeccable.cmd`; on first run it downloads its engine, so run it only when the user agrees.
+- `pack-gsap-gsap-core`, `pack-gsap-gsap-timeline`, `pack-gsap-gsap-scrolltrigger`, `pack-gsap-gsap-react`,
+  `pack-gsap-gsap-plugins`, `pack-gsap-gsap-utils`, `pack-gsap-gsap-performance`, `pack-gsap-gsap-frameworks`
+  (official GSAP skills): read core first, then the one for the job (scroll effects, React, plugins). `npm install gsap`.
+- `pack-designlang-extract-design` (Designlang): when the user gives a reference site to match, run
+  `npx designlang <url>` in the project and build from its tokens - take the feel, never copy logos, text or images.
+- `pack-playwright-playwright-cli` (Playwright CLI): scripted browser checks and tests of the finished site
+  (`npx playwright cli ...`; `najd_web_preview` stays the quick way to look at a page).
+
+Two libraries are free to use in the user's projects but may not be redistributed, so NAJD does not ship them; fetch
+them into the user's project when needed:
+
+- **React Bits** (animated React components; MIT + Commons Clause): browse the list at
+  `https://reactbits.dev/r/registry.json`, then add one to a Vite + React + Tailwind project with
+  `npx shadcn@latest add https://reactbits.dev/r/<Name>-TS-TW` (for example `BlurText-TS-TW`). Using the component in
+  the site, even a commercial one, is allowed; do not republish the components themselves.
+- **Transitions.dev** (CSS transitions for dropdowns, modals, toasts, tabs, loaders and more): read the guide with
+  `najd_web_extract` from
+  `https://raw.githubusercontent.com/Jakubantalik/transitions.dev/6a7d68260d624eb66661cc3af17e0989476f48ae/skills/transitions-dev/SKILL.md`,
+  then the numbered file it names from the same folder, and paste the snippet into the project. It may be used in any
+  site; do not republish the collection.
+
+Use motion with purpose and keep the `prefers-reduced-motion` guard every pack recommends.
+
 ## Quality bar
 
 - Works from 360 px to 1920 px with no sideways scrolling; tap targets at least 44 px on phones.

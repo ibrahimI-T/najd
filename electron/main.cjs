@@ -118,6 +118,9 @@ const najdSkillRows = require('node:fs').readdirSync(path.join(__dirname, 'najd-
   return { id: field('name'), name: field('name'), description: field('description').slice(0, 400), source: 'najd', sourceRevision: null, relativePath: 'najd-skills/' + name,
     platforms: ['windows'], license: 'NAJD', author: 'NAJD', digest: require('node:crypto').createHash('sha256').update(body).digest('hex'), body }
 })
+// Open-source design skill packs (skill-packs/, resources/skill-packs when installed), checked against their manifest.
+const { createSkillPacks } = require('./skill-packs.cjs')
+const skillPacks = createSkillPacks({ root: app.isPackaged ? path.join(process.resourcesPath, 'skill-packs') : path.join(__dirname, '..', 'skill-packs') })
 const helpUrl = 'https://github.com/ibrahimI-T/najd#readme'
 const ollama = createOllamaClient()
 let credentials
@@ -522,13 +525,19 @@ app.whenReady().then(() => {
   mcpConnectors = createMcpConnectors({ node: windowsNode, preference: createConnectorPreference({ filePath: connectorPrefs }) })
   // The local Windows companion starts connected unless the user turned it off.
   void mcpConnectors.resume()
-  const bundledSkills = createInstructionSkills({ filePath: path.join(app.getPath('userData'), 'najd-data/instruction-skills.json'), bundle: { ...upstreamSkillBundle, skills: [...upstreamSkillBundle.skills, ...najdSkillRows] } })
+  const bundledSkills = createInstructionSkills({ filePath: path.join(app.getPath('userData'), 'najd-data/instruction-skills.json'), bundle: { ...upstreamSkillBundle, skills: [...upstreamSkillBundle.skills, ...najdSkillRows, ...skillPacks.rows()] } })
   const externalSkills = createExternalSkills({ directory: path.join(app.getPath('userData'), 'najd-data/external-skills'), owners: () => pluginStore.ownedSkills() })
   // One skill surface for the model and UI; bundled and user-installed skills keep separate stores.
   const instructionSkills = {
     list: async () => [...await bundledSkills.list(), ...await externalSkills.list()],
     setEnabled: async (id, enabled) => (await externalSkills.has(id) ? externalSkills : bundledSkills).setEnabled(id, enabled),
-    read: async (id, offset, limit) => (await externalSkills.has(id) ? externalSkills : bundledSkills).read(id, offset, limit)
+    // A skill pack's guide comes with its folder and file list; its other files are read only while the skill is enabled.
+    read: async (id, offset, limit, file) => {
+      if (await externalSkills.has(id)) return file === undefined ? externalSkills.read(id, offset, limit) : Promise.reject(mainError('NOT_FOUND'))
+      const guide = await bundledSkills.read(id, offset, limit)
+      if (!skillPacks.has(id)) { if (file !== undefined) throw mainError('NOT_FOUND'); return guide }
+      return file === undefined ? { ...guide, ...skillPacks.describe(id) } : skillPacks.readFile(id, file, offset, limit)
+    }
   }
   // Plugins from outside (plugins.cjs). Install and removal are explicit actions of the owner in Settings; the agent installs only after an in-chat approval.
   const pluginStore = createPlugins({ directory: path.join(app.getPath('userData'), 'najd-data/plugins'), skills: externalSkills })
