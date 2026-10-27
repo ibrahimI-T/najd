@@ -4,7 +4,7 @@ const { GATES, checkEvidence } = require('../scripts/release-gates.cjs')
 
 const base = () => ({
   evidence: { format: 'najd-gate-evidence-v1', version: '1.2.3', commit: 'abc', clean: true, installerSha512: 'SHA', finishedAt: new Date(Date.UTC(2026, 0, 1, 12)).toISOString(),
-    results: Object.fromEntries(Object.keys(GATES).map(name => [name, { status: 'passed', seconds: 1 }])) },
+    results: Object.fromEntries(Object.keys(GATES).map(name => [name, { status: 'passed', seconds: 1 }])), interactiveDesktop: true },
   version: '1.2.3', commit: 'abc', clean: true, installerSha512: 'SHA', now: Date.UTC(2026, 0, 1, 13)
 })
 
@@ -76,4 +76,18 @@ test('a failed gate prints separate redacted tails of stdout and stderr (C81-01)
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../scripts/release-gates.cjs'), 'utf8')
   assert.ok(source.includes("console.log('--- stdout (last 80 lines)\\n' + redactBlock(last(run.stdout), 20000))"))
   assert.ok(source.includes("console.log('--- stderr (last 80 lines)\\n' + redactBlock(last(run.stderr), 20000)"))
+})
+test('evidence without the native window demonstrations is accepted only where declared, never for local signing', () => {
+  const ci = base(); ci.evidence.interactiveDesktop = false
+  assert.deepEqual(checkEvidence(ci), ['NATIVE_DEMOS_NOT_RUN'])
+  assert.deepEqual(checkEvidence({ ...ci, allowNoInteractiveDesktop: true }), [])
+  const old = base(); delete old.evidence.interactiveDesktop
+  assert.deepEqual(checkEvidence({ ...old, allowNoInteractiveDesktop: true }), ['NATIVE_DEMOS_NOT_RUN'])
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../scripts/publish-release.cjs'), 'utf8')
+  assert.match(source, /require\('\.\/release-gates\.cjs'\)\.assertEvidence\(\)/)
+})
+test('release gates require the Windows node host so native checks cannot be skipped silently (C83-01)', () => {
+  const read = file => require('node:fs').readFileSync(require('node:path').join(__dirname, file), 'utf8')
+  assert.ok(read('../scripts/release-gates.cjs').includes("env: { ...process.env, NAJD_TEST_REQUIRE_NATIVE_HOST: '1' }"))
+  assert.ok(read('./electron-ui-smoke.cjs').includes("!nativeHost && process.env.NAJD_TEST_REQUIRE_NATIVE_HOST === '1') throw new Error("))
 })

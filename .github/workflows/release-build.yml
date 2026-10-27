@@ -69,10 +69,13 @@ jobs:
       - name: Release gates
         env:
           NAJD_TEST_PACKAGE_DIR: release/${{ inputs.version }}
+          # Hosted runners have no interactive desktop, so Windows refuses foreground input for the two native window
+          # demonstrations (Chrome/Edge). They are skipped here and recorded as such in the evidence; every other gate runs.
+          NAJD_TEST_NO_INTERACTIVE_DESKTOP: '1'
         run: |
           node scripts/release-gates.cjs --run
           if ($LASTEXITCODE -ne 0) { throw 'Release gates failed' }
-          node scripts/release-gates.cjs
+          node scripts/release-gates.cjs --allow-no-interactive-desktop
           if ($LASTEXITCODE -ne 0) { throw 'Release gate evidence is not valid' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: unsigned
@@ -144,6 +147,8 @@ jobs:
             echo "Download NAJD-AGENT-Setup.exe and run it. Your chats and settings are kept."
             echo
             echo "Check that it was built here, with the GitHub CLI: gh attestation verify NAJD-AGENT-Setup.exe --repo ${GITHUB_REPOSITORY}"
+            echo
+            echo "Before publishing, the build ran the release checks (tests, build, notices, audit, desktop, UX, runtime preparation, packaged app). GitHub's machines have no interactive screen, so the two native Chrome/Edge window demonstrations were skipped there."
             echo
             echo "SHA-256: ${hash}"
           } > ../notes.md

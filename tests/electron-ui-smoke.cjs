@@ -366,7 +366,10 @@ async function main() {
     await waitFor(async () => (await evaluate(instance.client, 'document.body.innerText')).includes('لم يُشغَّل اختبار Windows'))
     // The Windows companion may be connected at startup (owner default); a denial must still allow no Windows action.
     await assertNoAllowedWindowsAction(root)
-    if (!process.argv.includes('--packaged') && await fs.access(path.join(__dirname, '../.runtimes/windows-node-host/Najd.WindowsNode.dll')).then(() => true, () => false)) {
+    const nativeHost = await fs.access(path.join(__dirname, '../.runtimes/windows-node-host/Najd.WindowsNode.dll')).then(() => true, () => false)
+    // Release gates set NAJD_TEST_REQUIRE_NATIVE_HOST so the native checks can never be skipped silently for want of the host.
+    if (!process.argv.includes('--packaged') && !nativeHost && process.env.NAJD_TEST_REQUIRE_NATIVE_HOST === '1') throw new Error('The Windows node host is not built (npm run build:windows-node); release gates need the native checks')
+    if (!process.argv.includes('--packaged') && nativeHost) {
       await click(instance.client, '#prompt')
       await instance.client.send('Input.insertText', { text: '/apps' })
       await click(instance.client, '.send-button')
@@ -374,8 +377,12 @@ async function main() {
       await click(instance.client, '.approval-allow')
       await waitFor(async () => (await evaluate(instance.client, 'document.body.innerText')).includes('نتيجة البحث عن التطبيقات'))
       assert.ok((await evaluate(instance.client, 'document.body.innerText')).includes('Notepad: موجود'))
+      // Hosted CI runners have no interactive desktop to put a window in the foreground, so Windows refuses the input
+      // (PERMISSION_DENIED). The release workflow says so explicitly; the evidence records it, and the native /apps check above still runs.
+      const noInteractiveDesktop = process.env.NAJD_TEST_NO_INTERACTIVE_DESKTOP === '1'
       if (process.argv.includes('--provider-only')) console.log('SKIP: interactive native app demonstrations in this provider-focused run; full desktop smoke retains both strict checks.')
-      for (const app of process.argv.includes('--provider-only') ? [] : ['chrome', 'edge']) {
+      else if (noInteractiveDesktop) console.log('SKIP: interactive native app demonstrations (NAJD_TEST_NO_INTERACTIVE_DESKTOP=1, no interactive desktop on this machine).')
+      for (const app of process.argv.includes('--provider-only') || noInteractiveDesktop ? [] : ['chrome', 'edge']) {
         const before = await evaluate(instance.client, 'document.body.innerText.split("اكتمل اختبار Windows وتحققت كل الخطوات.").length')
         await click(instance.client, '#prompt')
         await instance.client.send('Input.insertText', { text: `/windows ${app}` })

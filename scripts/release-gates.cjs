@@ -26,9 +26,12 @@ function sha512File(file) {
 }
 
 // Pure check, used by the tests and by the signing and publishing commands. Returns the list of problems (empty means the evidence is acceptable).
-function checkEvidence({ evidence, version, commit, clean, installerSha512, now = Date.now(), maxAgeHours = MAX_AGE_HOURS }) {
+// Evidence from a machine without an interactive desktop (hosted CI) skipped the native window demonstrations; it is
+// accepted only where that is declared (allowNoInteractiveDesktop), never for a locally signed release.
+function checkEvidence({ evidence, version, commit, clean, installerSha512, now = Date.now(), maxAgeHours = MAX_AGE_HOURS, allowNoInteractiveDesktop = false }) {
   const problems = []
   if (!evidence || typeof evidence !== 'object') return ['EVIDENCE_MISSING']
+  if (evidence.interactiveDesktop !== true && !(allowNoInteractiveDesktop && evidence.interactiveDesktop === false)) problems.push('NATIVE_DEMOS_NOT_RUN')
   if (evidence.format !== 'najd-gate-evidence-v1') problems.push('EVIDENCE_FORMAT')
   if (evidence.version !== version) problems.push('VERSION_MISMATCH')
   if (!commit || evidence.commit !== commit) problems.push('COMMIT_MISMATCH')
@@ -57,14 +60,14 @@ function gitState(root) {
 function installerPath(root, version) { return path.join(root, 'release', version, `NAJD-AGENT-Setup-${version}.exe`) }
 const evidencePath = (root, version) => path.join(root, 'release', version, 'gate-evidence.json')
 
-function assertEvidence({ root = path.resolve(__dirname, '..'), now = Date.now() } = {}) {
+function assertEvidence({ root = path.resolve(__dirname, '..'), now = Date.now(), allowNoInteractiveDesktop = false } = {}) {
   const version = require(path.join(root, 'package.json')).version
   let evidence = null
   try { evidence = JSON.parse(fs.readFileSync(evidencePath(root, version), 'utf8')) } catch { /* reported as missing */ }
   const state = gitState(root)
   let installerSha512 = null
   try { installerSha512 = sha512File(installerPath(root, version)) } catch { /* reported as a mismatch */ }
-  const problems = checkEvidence({ evidence, version, commit: state.commit, clean: state.clean, installerSha512, now })
+  const problems = checkEvidence({ evidence, version, commit: state.commit, clean: state.clean, installerSha512, now, allowNoInteractiveDesktop })
   if (problems.length) throw Object.assign(new Error('Release gates not satisfied: ' + problems.join(', ') + '. Run: node scripts/release-gates.cjs --run'), { problems })
   return evidence
 }
@@ -76,7 +79,7 @@ function runGates(root = path.resolve(__dirname, '..')) {
   const results = {}
   for (const [name, args] of Object.entries(GATES)) {
     const started = Date.now()
-    const run = spawnSync(process.execPath, [npm, ...args], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 45 * 60000 })
+    const run = spawnSync(process.execPath, [npm, ...args], { cwd: root, env: { ...process.env, NAJD_TEST_REQUIRE_NATIVE_HOST: '1' }, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 45 * 60000 })
     results[name] = { status: run.status === 0 ? 'passed' : 'failed', seconds: Math.round((Date.now() - started) / 1000) }
     console.log(`${results[name].status === 'passed' ? 'PASS' : 'FAIL'}: ${name} (${results[name].seconds}s)`)
     // The end of a failed gate's output says why; tests use fake credentials only, and the text is redacted as in logs.
@@ -91,15 +94,15 @@ function runGates(root = path.resolve(__dirname, '..')) {
   let installerSha512 = null
   try { installerSha512 = sha512File(installerPath(root, version)) } catch { /* the package gate would have failed; recorded as null */ }
   const evidence = { format: 'najd-gate-evidence-v1', version, commit: endState.commit, clean: startState.clean && endState.clean && startState.commit === endState.commit,
-    installerSha512, finishedAt: new Date().toISOString(), results }
+    installerSha512, finishedAt: new Date().toISOString(), results, interactiveDesktop: process.env.NAJD_TEST_NO_INTERACTIVE_DESKTOP !== '1' }
   fs.mkdirSync(path.dirname(evidencePath(root, version)), { recursive: true })
   fs.writeFileSync(evidencePath(root, version), JSON.stringify(evidence, null, 2) + '\n')
-  const problems = checkEvidence({ evidence, version, commit: endState.commit, clean: endState.clean, installerSha512 })
+  const problems = checkEvidence({ evidence, version, commit: endState.commit, clean: endState.clean, installerSha512, allowNoInteractiveDesktop: evidence.interactiveDesktop === false })
   if (problems.length) { console.error('Gates not satisfied: ' + problems.join(', ')); process.exitCode = 1 } else console.log('All release gates passed for ' + endState.commit.slice(0, 8))
 }
 
 module.exports = { GATES, MAX_AGE_HOURS, checkEvidence, assertEvidence, runGates, sha512File, gitState }
 if (require.main === module) {
   if (process.argv[2] === '--run') runGates()
-  else { try { assertEvidence(); console.log('Gate evidence is valid.') } catch (error) { console.error(error.message); process.exitCode = 1 } }
+  else { try { assertEvidence({ allowNoInteractiveDesktop: process.argv.includes('--allow-no-interactive-desktop') }); console.log('Gate evidence is valid.') } catch (error) { console.error(error.message); process.exitCode = 1 } }
 }
