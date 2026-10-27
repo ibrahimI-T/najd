@@ -79,6 +79,12 @@ function runGates(root = path.resolve(__dirname, '..')) {
     const run = spawnSync(process.execPath, [npm, ...args], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 45 * 60000 })
     results[name] = { status: run.status === 0 ? 'passed' : 'failed', seconds: Math.round((Date.now() - started) / 1000) }
     console.log(`${results[name].status === 'passed' ? 'PASS' : 'FAIL'}: ${name} (${results[name].seconds}s)`)
+    // The end of a failed gate's output says why; tests use fake credentials only, and the text is redacted as in logs.
+    if (run.status !== 0) {
+      const { redactBlock } = require('../electron/redact.cjs'), last = text => String(text || '').split('\n').slice(-80).join('\n')
+      console.log('--- stdout (last 80 lines)\n' + redactBlock(last(run.stdout), 20000))
+      console.log('--- stderr (last 80 lines)\n' + redactBlock(last(run.stderr), 20000) + (run.error ? '\n' + redactBlock(run.error.message, 2000) : ''))
+    }
     if (run.status !== 0) break
   }
   const endState = gitState(root)

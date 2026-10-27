@@ -72,3 +72,8 @@ test('bytecode outside electron/ is not exempt from the clean-tree check (C79-01
   fs.writeFileSync(path.join(root, 'browser-extension/__pycache__/a.cpython-314.pyc'), '')
   assert.equal(gitState(root).clean, false)
 })
+test('a failed gate prints separate redacted tails of stdout and stderr (C81-01)', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../scripts/release-gates.cjs'), 'utf8')
+  assert.ok(source.includes("console.log('--- stdout (last 80 lines)\\n' + redactBlock(last(run.stdout), 20000))"))
+  assert.ok(source.includes("console.log('--- stderr (last 80 lines)\\n' + redactBlock(last(run.stderr), 20000)"))
+})
