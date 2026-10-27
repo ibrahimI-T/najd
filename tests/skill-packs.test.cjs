@@ -60,7 +60,7 @@ test('the web builder guide names exactly the shipped pack skills, and they ship
   const notices = createSkillPacks({ root }).notices().join('\n')
   for (const title of ['Taste Skill', 'Impeccable', 'GSAP Skills', 'Playwright CLI', 'Designlang']) assert.ok(notices.includes(title), title)
   assert.match(fs.readFileSync(path.join(__dirname, '../scripts/generate-notices.cjs'), 'utf8'), /skill-packs\.cjs'\)\.createSkillPacks\(/)
-  assert.match(fs.readFileSync(path.join(__dirname, '../.gitattributes'), 'utf8'), /^skill-packs\/\*\* -text$/m)
+  assert.match(fs.readFileSync(path.join(__dirname, '../.gitattributes'), 'utf8'), /^skill-packs\/\*\* -text\r?$/m)
 })
 
 test('the model reads pack files through najd_skills_read and main routes them only for pack skills', () => {
@@ -68,7 +68,7 @@ test('the model reads pack files through najd_skills_read and main routes them o
   assert.match(runtime, /\['najd_skills_read', 'skills\.read', [^\]]*\{ id: \{ type: 'string' \}, file: \{ type: 'string' \}/)
   assert.match(runtime, /typeof args\.file === 'string' && args\.file \? args\.file\.slice\(0, 300\) : undefined\); break/)
   const main = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8')
-  assert.match(main, /const guide = await bundledSkills\.read\(id, offset, limit\)\n\s+if \(!skillPacks\.has\(id\)\) \{ if \(file !== undefined\) throw mainError\('NOT_FOUND'\); return guide \}/)
+  assert.match(main, /const guide = await bundledSkills\.read\(id, offset, limit\)\r?\n\s+if \(!skillPacks\.has\(id\)\) \{ if \(file !== undefined\) throw mainError\('NOT_FOUND'\); return guide \}/)
 })
 
 test('after an upgrade, a settings file saved before the packs existed still has every pack on, and they cannot be turned off (C85-01)', async t => {
