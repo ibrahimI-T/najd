@@ -1,0 +1,4 @@
+{
+  "node": { "version": "24.21.0", "archiveSha256": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541" },
+  "openclaw": { "version": "2026.10.3", "integrity": "sha512-ncl6LntMlf76K39LFhVrDXQTbaGNAG5j52f7PL5P8vIn0knWmCrvfAe9DHMslFq+47HeOWBH2CBYQH8zEb+UAA==", "dependencyLockSha256": "b11e2abf6e147bf750053ca248dafd50b877e6963ab061be78822cc5c1dca59b", "sourceBaseline": "9ad5e98edb514da1ceb4d98af1b8a2817d6eb8aa" }
+}

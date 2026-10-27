@@ -1,0 +1,45 @@
+diff --git a/tests/OpenClaw.Shared.Tests/ExecReusableCommandBinderTests.cs b/tests/OpenClaw.Shared.Tests/ExecReusableCommandBinderTests.cs
+index 29ca0c96..9205b199 100644
+--- a/tests/OpenClaw.Shared.Tests/ExecReusableCommandBinderTests.cs
++++ b/tests/OpenClaw.Shared.Tests/ExecReusableCommandBinderTests.cs
+@@ -14 +14 @@ namespace OpenClaw.Shared.Tests;
+-public class ExecReusableCommandBinderTests
++public class ExecReusableCommandBinderTests : IDisposable
+@@ -15,0 +16,28 @@ public class ExecReusableCommandBinderTests
++    private string? _unquotedHostDirectory;
++
++    // These tests exercise the accepted unquoted grammar. A checkout path with
++    // spaces belongs to the separately tested rejected quoted-executable grammar.
++    private string FindUnquotedTestHostExecutable()
++    {
++        if (_unquotedHostDirectory is null)
++        {
++            var source = Path.GetDirectoryName(FindTestHostExecutable())!;
++            _unquotedHostDirectory = Directory.CreateTempSubdirectory("openclaw-argv-").FullName;
++            Assert.DoesNotContain(" ", _unquotedHostDirectory);
++            foreach (var file in Directory.EnumerateFiles(source))
++                File.Copy(file, Path.Combine(_unquotedHostDirectory, Path.GetFileName(file)));
++        }
++        return Path.Combine(_unquotedHostDirectory, "OpenClaw.Shared.TestHost.exe");
++    }
++
++    public void Dispose()
++    {
++        if (_unquotedHostDirectory is null) return;
++        // Windows may briefly retain an executable handle after process exit.
++        for (var attempt = 0; ; attempt++)
++        {
++            try { Directory.Delete(_unquotedHostDirectory, recursive: true); return; }
++            catch (IOException) when (attempt < 9) { System.Threading.Thread.Sleep(100); }
++            catch (UnauthorizedAccessException) when (attempt < 9) { System.Threading.Thread.Sleep(100); }
++        }
++    }
+@@ -630 +658 @@ public class ExecReusableCommandBinderTests
+-        var host = FindTestHostExecutable();
++        var host = FindUnquotedTestHostExecutable();
+@@ -652 +680 @@ public class ExecReusableCommandBinderTests
+-        var host = FindTestHostExecutable();
++        var host = FindUnquotedTestHostExecutable();
+@@ -886 +914 @@ public class ExecReusableCommandBinderTests
+-        var host = FindTestHostExecutable();
++        var host = FindUnquotedTestHostExecutable();

@@ -1,0 +1,33 @@
+.accounts { display: flex; flex-direction: column; gap: 14px; color: var(--text); }
+.accounts-intro { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); font-size: var(--text-m); line-height: 1.7; }
+.accounts-intro svg { flex: none; margin-top: 3px; color: var(--success, #6fc48f); }
+.accounts-form { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.accounts-form h3, .accounts-list-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--text-lg); }
+.accounts-form label { display: grid; gap: 4px; font-size: var(--text-s); color: var(--muted); }
+.accounts-form input:not([type='checkbox']) { height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); color: var(--text); font: inherit; font-size: var(--text-base); }
+.accounts-form input:focus-visible, .accounts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.accounts .accounts-check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: var(--text-m); }
+.accounts-error { margin: 0; padding: 8px 10px; border-radius: 8px; color: var(--danger, #e5776f); background: color-mix(in srgb, var(--danger, #e5776f) 10%, transparent); font-size: var(--text-m); }
+.accounts-save { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink, #fff); font: inherit; font-weight: 600; cursor: pointer; }
+.accounts-save:disabled { opacity: .6; cursor: default; }
+.accounts-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.accounts-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.accounts-main { flex: 1; min-width: 180px; display: grid; gap: 2px; }
+.accounts-main bdi { color: var(--muted); font-size: var(--text-s); }
+.accounts-main small { color: var(--subtle); font-size: var(--text-s); }
+.accounts-remove, .accounts-confirm button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-raised); color: var(--text); font: inherit; font-size: var(--text-s); cursor: pointer; }
+.accounts-remove:hover { border-color: var(--danger, #e5776f); color: var(--danger, #e5776f); }
+.accounts-confirm { display: inline-flex; gap: 6px; }
+.accounts-confirm .danger { border-color: var(--danger, #e5776f); color: var(--danger, #e5776f); }
+.accounts-empty { margin: 0; color: var(--subtle); }
+
+/* Settings > Browser: linked browsers */
+.browser-sub { margin: 14px 0 6px; font-size: var(--text-m); color: var(--muted); font-weight: 600; }
+.browser-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.browser-links li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.browser-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--subtle); flex: none; }
+.browser-dot.on { background: var(--success, #6fc48f); }
+.browser-link-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.browser-link-main small { color: var(--subtle); font-size: var(--text-s); }
+.browser-more { margin-top: 10px; }
+.browser-more summary { cursor: pointer; color: var(--muted); font-size: var(--text-m); }

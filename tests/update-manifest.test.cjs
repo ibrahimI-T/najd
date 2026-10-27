@@ -1,0 +1,32 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const { generateKeyPairSync, sign, createHash } = require('node:crypto')
+const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path')
+const { verifyManifest, verifyInstaller, newer } = require('../electron/update-manifest.cjs')
+const keys = generateKeyPairSync('ed25519'), other = generateKeyPairSync('ed25519')
+const config = { channel: 'development', publicKey: keys.publicKey }
+const data = Buffer.from('owned installer fixture')
+const record = () => ({ format: 'najd-update-v1', channel: 'development', platform: 'win32-x64', version: '0.6.1', publishedAt: new Date().toISOString(), notes: 'Development proof', file: { name: 'NAJD-AGENT-Setup-0.6.1.exe', size: data.length, sha512: createHash('sha512').update(data).digest('base64') } })
+function envelope(value = record(), key = keys.privateKey) { const bytes = Buffer.from(JSON.stringify(value));return JSON.stringify({ payload: bytes.toString('base64'), signature: sign(null, bytes, key).toString('base64') }) }
+test('release trust requires the pinned key, fixed channel/platform/schema and exact installer name', () => {
+  assert.equal(verifyManifest(envelope(), config).version, '0.6.1')
+  assert.throws(() => verifyManifest(envelope(record(), other.privateKey), config), { code: 'UPDATE_SIGNATURE_INVALID' })
+  const tampered = JSON.parse(envelope());tampered.payload = Buffer.from('{}').toString('base64')
+  assert.throws(() => verifyManifest(JSON.stringify(tampered), config), { code: 'UPDATE_SIGNATURE_INVALID' })
+  for (const value of [{ ...record(), channel: 'stable' }, { ...record(), platform: 'darwin' }, { ...record(), url: 'https://attacker.test' }, { ...record(), version: '0.6.1-beta' }, { ...record(), file: { ...record().file, name: '../other.exe' } }, { ...record(), file: { ...record().file, size: 3 * 1024 ** 3 } }]) assert.throws(() => verifyManifest(envelope(value), config), { code: 'UPDATE_INVALID' })
+  assert.throws(() => verifyManifest('x'.repeat(32769), config), { code: 'UPDATE_INVALID' })
+})
+test('version checks reject malformed values, downgrades and same-version reinstall', () => {
+  assert.equal(newer('0.6.1','0.6.0'), true);assert.equal(newer('0.10.0','0.9.99'), true)
+  assert.equal(newer('0.6.0','0.6.0'), false);assert.equal(newer('0.5.9','0.6.0'), false)
+  for (const value of ['01.6.1', 'v0.6.1', '0.6.1-beta', 'https://example.test']) assert.throws(() => newer(value, '0.6.0'), { code: 'UPDATE_INVALID' })
+})
+test('installer verification rejects size/hash changes and non-files before execution', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(),'najd-update-test-'))
+  t.after(async()=>{assert.match(path.basename(root),/^najd-update-test-/);await fs.rm(root,{recursive:true,force:true})})
+  const file = path.join(root,'installer.exe');await fs.writeFile(file,data)
+  await verifyInstaller(file, record())
+  await fs.writeFile(file,Buffer.alloc(data.length,1));await assert.rejects(verifyInstaller(file,record()),{code:'UPDATE_SIGNATURE_INVALID'})
+  await fs.writeFile(file,'short');await assert.rejects(verifyInstaller(file,record()),{code:'UPDATE_SIGNATURE_INVALID'})
+  await assert.rejects(verifyInstaller(root,record()),{code:'UPDATE_SIGNATURE_INVALID'})
+})

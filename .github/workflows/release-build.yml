@@ -1,0 +1,75 @@
+name: Release build
+# Builds the complete Windows installer from a clean checkout: every bundled runtime is provisioned here from its
+# pinned, checksum-verified source, so the installer can be signed from CI (SignPath Foundation, see
+# docs/OPEN-SOURCE-READINESS.md). No signing key or publishing token is stored in this repository.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version already committed in package.json
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      REQUESTED_VERSION: ${{ inputs.version }}
+      ENGINE_PACK: .runtimes/runtime-packs/agent-core-ci
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: true
+          # GitVersion in openclaw-windows-node needs the full submodule history.
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: node -e "if(process.env.REQUESTED_VERSION !== require('./package.json').version) throw new Error('Commit the exact release version first')"
+      - run: npm.cmd install --global npm@11.12.1
+      - run: npm.cmd ci
+      - run: npm.cmd run setup:electron
+      # Pinned runtimes, each verified against the checksum or integrity recorded in the repository.
+      - run: npm.cmd run setup:node
+      - run: npm.cmd run setup:openclaw
+      - run: npm.cmd run setup:dotnet
+      - run: node scripts/build-windows-node.cjs
+      - run: npm.cmd run setup:hermes
+      - name: Stage the engine
+        shell: pwsh
+        run: |
+          $python = Get-ChildItem .runtimes/hermes/tools -Directory -Filter 'python-*-win32-x64' | Select-Object -First 1
+          if (-not $python) { throw 'Pinned Python was not provisioned' }
+          & (Join-Path $python.FullName 'python.exe') -I -B scripts/stage-agent-core.py --output $env:ENGINE_PACK
+          if ($LASTEXITCODE -ne 0) { throw 'Engine staging failed' }
+      - run: node scripts/stage-bundle.cjs --engine ${{ env.ENGINE_PACK }}
+      - run: node scripts/sync-installer-size.cjs
+      - run: npm.cmd test
+      - run: npm.cmd audit --omit=dev --audit-level=high
+      - run: npm.cmd run dist -- --config.directories.output=release/ci
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: unsigned
+        with:
+          name: najd-windows-unsigned
+          path: release/ci/NAJD-AGENT-Setup-*.exe
+          retention-days: 14
+          if-no-files-found: error
+      # SignPath Foundation signing. Enable after the project is approved: add the repository secret
+      # SIGNPATH_API_TOKEN and the variables SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG and
+      # SIGNPATH_POLICY_SLUG, then remove the condition below.
+      - name: Submit to SignPath
+        if: ${{ false }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: release/signed
+      - shell: pwsh
+        run: Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Unsigned installer built from pinned sources. Publishing stays a separate, explicit owner step.'

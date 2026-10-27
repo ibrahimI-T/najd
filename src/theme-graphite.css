@@ -1,0 +1,85 @@
+/* ==========================================================================
+   Graphite theme (default since 2026-10-19, owner request)
+   Luxurious black with graphite grays and a silver logo. The chat sits under a night sky
+   (Starfield) that fades into calm graphite once the conversation has messages.
+   ========================================================================== */
+:root[data-theme='graphite'] {
+  /* Owner palette 2026-10-21: flat programmer graphite. --subtle is lifted from #6f6f6f to #858585 so 11-12px meta text keeps AA contrast. */
+  --bg: #111111; --sidebar: #151515; --panel: #1c1c1c; --panel-raised: #242424;
+  --input: #1c1c1c; --text: #f2f2f2; --muted: #a0a0a0; --subtle: #858585;
+  --line: #303030; --hover: rgba(255, 255, 255, .06); --accent: #2f8cff; --accent-ink: #ffffff;
+  --user-bubble: #242424; --danger: #e5776f; --success: #6fc48f;
+  --scrollbar-thumb: rgba(255, 255, 255, .13); --scrollbar-thumb-hover: rgba(255, 255, 255, .24);
+  --silver: linear-gradient(180deg, #ffffff 0%, #d4d4d8 45%, #8e8e95 100%);
+  --graphite: #303030;
+  --shadow-menu: 0 12px 28px rgba(0, 0, 0, .4);
+  color: #f2f2f2; background: #111111;
+}
+[data-theme='graphite'] .app-shell { background: #111111; }
+[data-theme='graphite'] .app-rail, [data-theme='graphite'] .sidebar { background: var(--sidebar); border-right: 1px solid var(--line); }
+[data-theme='graphite'] .topbar { background: transparent; border-bottom-color: rgba(255, 255, 255, .05); }
+[data-theme='graphite'] .brand strong {
+  font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 21px; letter-spacing: .16em;
+  background: var(--silver); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+[data-theme='graphite'] .brand small { color: #9d9da4; letter-spacing: .42em; }
+/* The medallion turns silver. */
+[data-theme='graphite'] .rail-logo, [data-theme='graphite'] .welcome-logo { filter: grayscale(1) contrast(1.08) brightness(1.12); }
+[data-theme='graphite'] .rail-logo { box-shadow: 0 0 0 1px rgba(255, 255, 255, .18); }
+[data-theme='graphite'] .new-chat {
+  border-color: rgba(255, 255, 255, .16); color: #f4f4f6;
+  background: #1c1c1c;
+}
+[data-theme='graphite'] .new-chat:hover { background: #242424; }
+[data-theme='graphite'] .session-row.active { background: rgba(255, 255, 255, .07); }
+[data-theme='graphite'] .app-rail .rail-item.active { color: #f4f4f6; }
+[data-theme='graphite'] .app-rail .rail-item.active::before { background: #d4d4d8; }
+
+/* Night sky over black; the graphite layer rises when the conversation starts. */
+[data-theme='graphite'] .chat-area { position: relative; overflow: hidden; isolation: isolate; background: #111111; }
+[data-theme='graphite'] .chat-area::before {
+  content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none; opacity: 0;
+  background: #111111;
+  transition: opacity 900ms var(--ease-out);
+}
+[data-theme='graphite'] .chat-area[data-calm='true']::before { opacity: 1; }
+.starfield { display: none; }
+[data-theme='graphite'] .starfield {
+  display: block; position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; pointer-events: none;
+  transition: opacity 900ms var(--ease-out);
+}
+[data-theme='graphite'] .starfield[data-calm='true'] { opacity: 0; }
+
+[data-theme='graphite'] .welcome h1 {
+  font-size: clamp(30px, 4.4vw, 54px); font-weight: 700; line-height: 1.35;
+  color: #f2f2f2;
+}
+[data-theme='graphite'] .welcome-wordmark { background: var(--silver); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: .3em; }
+[data-theme='graphite'] .welcome-ornament span { background: #303030; }
+[data-theme='graphite'] .welcome-ornament i { border-color: rgba(255, 255, 255, .5); }
+
+[data-theme='graphite'] .composer {
+  background: #1c1c1c; border-color: #303030; border-radius: 12px; box-shadow: none;
+}
+[data-theme='graphite'] .composer:focus-within { border-color: var(--accent); box-shadow: none; }
+[data-theme='graphite'] .send-button { background: var(--accent); color: #fff; box-shadow: none; }
+[data-theme='graphite'] .send-button.stop { background: rgba(255, 255, 255, .14); color: var(--text); }
+[data-theme='graphite'] .message.user { color: #f2f2f2; background: #242424; border: 1px solid #303030; }
+[data-theme='graphite'] .message-brand { color: #c9c9ce; }
+[data-theme='graphite'] .code-block { background: #151515; }
+
+[data-theme='graphite'] .settings-overlay { background: rgba(0, 0, 0, .45); }
+[data-theme='graphite'] .settings-overlay .settings-area {
+  --panel: rgba(255, 255, 255, .035); --panel-raised: rgba(255, 255, 255, .065); --input: rgba(0, 0, 0, .3);
+  background: #151515; border-color: #303030; box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+}
+[data-theme='graphite'] .settings-nav-item.active { color: #f2f2f2; background: #242424; box-shadow: inset 0 0 0 1px #303030; }
+[data-theme='graphite'] .settings-heading h1 { color: #f2f2f2; }
+[data-theme='graphite'] .provider-options, [data-theme='graphite'] .attachment-popover, [data-theme='graphite'] .approval-card,
+[data-theme='graphite'] .notice, [data-theme='graphite'] .runtime-banner, [data-theme='graphite'] .jump-latest, [data-theme='graphite'] .local-file-preview {
+  background: #1c1c1c; border-color: #303030;
+}
+[data-theme='graphite'] .approval-allow { background: var(--accent); color: #fff; border: 0; }
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme='graphite'] .composer, [data-theme='graphite'] .settings-overlay .settings-area { background: #18181a; }
+}

@@ -1,0 +1,99 @@
+/* Store-style catalogs (Marketplace.tsx) and the right panel's catalog cards. */
+.market { display: grid; gap: var(--space-4); min-width: 0; }
+.market-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.market-head h3 { margin: 0; font-size: var(--text-xl); }
+.market-installed {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--muted); font-size: 12px; font-weight: 600;
+}
+.market-installed:hover { color: var(--text); background: var(--hover); }
+.market-installed.on { color: var(--text); background: var(--hover); border-color: var(--subtle); }
+.market-search {
+  display: flex; align-items: center; gap: 10px; max-width: 420px; padding: 0 14px; height: 44px;
+  border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .02); color: var(--muted);
+}
+.market-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: 14px; outline: none; }
+.market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: var(--space-3); }
+.market-card {
+  display: flex; align-items: flex-start; gap: 14px; min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .03), rgba(255, 255, 255, .01));
+  transition: border-color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
+}
+.market-card:hover { border-color: rgba(255, 255, 255, .16); }
+.market-icon {
+  flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #d9d9de); color: #18181b; box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+.market-card[data-installed='false'] .market-icon { background: linear-gradient(180deg, #8e8e95, #5b5b61); color: #f1f1f3; }
+.market-text { min-width: 0; display: grid; gap: 4px; }
+.market-text strong { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.market-verified { flex: none; color: var(--muted); }
+.market-text p {
+  margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.market-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin-top: 6px; min-width: 0; }
+.market-status { color: var(--subtle); font-size: 11px; }
+.market-status.on { color: var(--success); }
+.market-empty { margin: 0; color: var(--muted); font-size: 13px; }
+.market-switch {
+  position: relative; flex: none; width: 36px; height: 21px; padding: 0; border: 0; border-radius: 999px; background: rgba(255, 255, 255, .16);
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+.market-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform var(--motion-fast) var(--ease-out); }
+.market-switch[aria-checked='true'] { background: var(--accent); }
+.market-switch[aria-checked='true']::after { transform: translateX(15px); }
+.market-switch:disabled { opacity: .45; }
+[data-theme='light'] .market-card { background: #fff; }
+[data-theme='light'] .market-search { background: #fff; }
+
+/* Right panel: catalog cards (skills, plugins, connections, memory). */
+.side-catalog { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.side-catalog li { display: grid; gap: 1px; padding: 7px 8px; border-radius: 10px; }
+.side-catalog li:hover { background: var(--hover); }
+.side-catalog strong { font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.side-catalog span { color: var(--muted); font-size: 11.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.side-more {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--text); font-size: 12px; font-weight: 600;
+}
+.side-more:hover { background: var(--hover); }
+.side-env { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.side-env li { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.side-env li svg { color: var(--muted); flex: none; }
+.side-env li .side-env-end { margin-inline-start: auto; color: var(--muted); font-size: 11.5px; }
+
+/* Management tools under a catalog (install forms, detailed controls), folded by default. */
+.catalog-manage { margin-top: var(--space-5); border: 1px solid var(--line); border-radius: 18px; padding: 4px 14px; }
+.catalog-manage > summary { cursor: pointer; padding: 12px 0; font-weight: 600; color: var(--text); }
+.catalog-manage[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.catalogs { display: grid; gap: var(--space-8); }
+
+/* Settings > Tools (ToolsCatalog.tsx). */
+.tools-catalog .market-installed { cursor: default; }
+.tools-intro { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 70ch; }
+.tools-group { display: grid; gap: var(--space-3); }
+.tools-group h4 { display: flex; align-items: center; gap: 8px; margin: var(--space-3) 0 0; font-size: 14px; }
+.tools-group h4 svg { color: var(--muted); }
+.tools-group h4 small { padding: 1px 8px; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 11px; font-weight: 600; }
+.tool-effect { padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
+
+/* Settings > Permissions: whole-computer reading. */
+.whole-computer { display: flex; align-items: flex-start; gap: 12px; margin: 14px 0; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255, 255, 255, .02); }
+.whole-computer > svg { color: var(--muted); flex: none; margin-top: 2px; }
+.whole-computer > div { flex: 1; min-width: 0; }
+.whole-computer strong { font-size: 13px; }
+.whole-computer p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+/* Right panel: produced files open with a click; the folder button shows them in Explorer. */
+.side-output { align-items: center; }
+.side-output-open { flex: 1; min-width: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--text); text-align: start; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-output-open:hover { color: var(--accent); }
+.side-output-folder { flex: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.side-output-folder:hover { background: var(--hover); color: var(--text); }
+
+/* Narrow windows (360 px): catalogs and their management sections never widen the page. */
+.market, .catalogs, .catalog-manage, .market-card, .market-search { min-width: 0; max-width: 100%; }
+.market-head { flex-wrap: wrap; }
+.catalog-manage input, .catalog-manage textarea, .catalog-manage code { max-width: 100%; }
+.catalog-manage code { overflow-wrap: anywhere; }

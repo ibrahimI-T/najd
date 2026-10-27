@@ -1,0 +1,22 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs/promises')
+const os = require('node:os')
+const path = require('node:path')
+const { createProviderPolicy, UNLIMITED } = require('../electron/provider-policy.cjs')
+
+test('NAJD sets no usage limits: the policy is fixed, ignores stored files and cannot be changed', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-policy-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const filePath = path.join(root, 'policy.json')
+  const store = createProviderPolicy({ filePath })
+  assert.deepEqual(await store.get(), UNLIMITED)
+  assert.equal(UNLIMITED.maxConcurrent, 0); assert.equal(UNLIMITED.maxInputChars, 0); assert.equal(UNLIMITED.maxCloudAttempts, 0); assert.equal(UNLIMITED.maxOutputTokens, 0)
+  // An old profile that stored limits (or a corrupt file) changes nothing, and nothing is ever written.
+  await fs.writeFile(filePath, JSON.stringify({ maxConcurrent: 1, timeoutMs: 5, maxInputChars: 1000, maxCloudAttempts: 1, maxOutputTokens: 128 }))
+  assert.deepEqual(await createProviderPolicy({ filePath }).get(), UNLIMITED)
+  await fs.writeFile(filePath, '{broken fixture')
+  assert.deepEqual(await createProviderPolicy({ filePath }).get(), UNLIMITED)
+  assert.deepEqual(await store.set({ maxConcurrent: 1, timeoutMs: 1, maxInputChars: 1000, maxCloudAttempts: 1 }), UNLIMITED)
+  assert.equal(await fs.readFile(filePath, 'utf8'), '{broken fixture')
+})

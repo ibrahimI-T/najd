@@ -1,0 +1,2 @@
+build/runtime-locks/*.json text eol=lf
+patches/**/*.patch text eol=lf

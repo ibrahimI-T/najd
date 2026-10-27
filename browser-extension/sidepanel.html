@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NAJD AGENT</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <img class="logo" src="icons/icon-48.png" alt="" width="28" height="28">
+    <div class="brand"><strong>NAJD AGENT</strong><small data-i18n="tagline"></small></div>
+    <span id="status" class="status" role="status" aria-live="polite"><i class="dot" aria-hidden="true"></i><span id="status-text"></span></span>
+  </header>
+
+  <main id="view-unlinked" hidden>
+    <h1 data-i18n="connectTitle"></h1>
+    <p data-i18n="connectBody"></p>
+    <p id="unlinked-note" class="note" role="status" hidden></p>
+    <button id="connect" class="primary" type="button" data-i18n="connectButton"></button>
+    <details class="more">
+      <summary data-i18n="manualTitle"></summary>
+      <p class="note" data-i18n="manualHint"></p>
+      <form id="code-form">
+        <input id="code" type="text" autocomplete="off" spellcheck="false" dir="ltr" data-i18n-placeholder="manualPlaceholder" aria-label="" required>
+        <button class="secondary" type="submit" data-i18n="manualButton"></button>
+      </form>
+      <p id="code-error" class="error" role="alert" hidden></p>
+    </details>
+  </main>
+
+  <main id="view-pairing" hidden>
+    <h1 data-i18n="pairingTitle"></h1>
+    <p class="code" id="pair-code" dir="ltr" aria-live="polite"></p>
+    <p data-i18n="pairingBody"></p>
+  </main>
+
+  <main id="view-linked" hidden>
+    <section id="site-access" class="banner" hidden>
+      <strong data-i18n="siteTitle"></strong>
+      <p data-i18n="siteBody"></p>
+      <button id="allow-sites" class="primary" type="button" data-i18n="siteButton"></button>
+    </section>
+    <p id="offline" class="banner" role="status" hidden data-i18n="offlineHelp"></p>
+
+    <form id="ask-form">
+      <label for="ask-text" data-i18n="askLabel"></label>
+      <textarea id="ask-text" rows="4" maxlength="4000" dir="auto" data-i18n-placeholder="askPlaceholder"></textarea>
+      <label class="check"><input id="include-page" type="checkbox" checked><span data-i18n="includePage"></span></label>
+      <p id="page-note" class="hint" hidden data-i18n="pageUnavailable"></p>
+      <p id="selection-note" class="hint" hidden data-i18n="selectionTooLong"></p>
+      <p id="selection-chip" class="chip" hidden data-i18n="selectionChip"></p>
+      <div class="row">
+        <button id="send" class="primary" type="submit" data-i18n="sendButton"></button>
+        <button id="stop" class="secondary" type="button" hidden data-i18n="stopButton"></button>
+      </div>
+      <p id="ask-error" class="error" role="alert" hidden></p>
+    </form>
+
+    <section id="answer" class="answer" hidden aria-live="polite">
+      <p id="answer-state" class="state"></p>
+      <p id="answer-progress" class="progress"></p>
+      <div id="answer-output-wrap" hidden>
+        <p id="answer-truncated" class="hint" hidden data-i18n="answerTruncated"></p>
+        <pre id="answer-output" dir="auto"></pre>
+        <button id="copy" class="secondary small" type="button" data-i18n="copy"></button>
+      </div>
+      <button id="new-ask" class="secondary small" type="button" hidden data-i18n="newAsk"></button>
+    </section>
+  </main>
+
+  <footer>
+    <p class="privacy" data-i18n="privacy"></p>
+    <button id="unlink" class="link" type="button" hidden data-i18n="unlinkButton"></button>
+  </footer>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "purpose": "Isolated development proof only; not a distributed runtime or default user model",
+  "ollamaVersion": "0.31.1",
+  "ollamaExeSha256": "ffb61f3800d250a080155fe6243c87e6effa67b0686546252c965bc8cb736b77",
+  "signer": "Ollama Inc.",
+  "model": "qwen2.5:1.5b",
+  "manifestSha256": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",
+  "registryManifest": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/1.5b",
+  "modelLicense": "Apache-2.0",
+  "licenseDigest": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+  "layerBytes": 986061405
+}

@@ -1,0 +1,194 @@
+{
+  "extName": {
+    "message": "NAJD AGENT — AI Browser Assistant"
+  },
+  "extDescription": {
+    "message": "Connects your browser to the NAJD AGENT desktop app: it browses for you, finishes tasks and answers in a side panel. Local only."
+  },
+  "actionTitle": {
+    "message": "NAJD AGENT"
+  },
+  "contextAskSelection": {
+    "message": "Ask NAJD about \"%s\""
+  },
+  "contextAskPage": {
+    "message": "Ask NAJD about this page"
+  },
+  "tagline": {
+    "message": "Your personal agent, in your browser"
+  },
+  "statusConnected": {
+    "message": "Connected to NAJD"
+  },
+  "statusOffline": {
+    "message": "NAJD is not running"
+  },
+  "statusUnlinked": {
+    "message": "Not linked"
+  },
+  "statusPairing": {
+    "message": "Waiting for your confirmation"
+  },
+  "statusSearching": {
+    "message": "Looking for NAJD…"
+  },
+  "connectTitle": {
+    "message": "Connect to NAJD"
+  },
+  "connectBody": {
+    "message": "Link this browser with the NAJD AGENT app on this computer. NAJD will ask you to confirm in its own window. The link itself never leaves this computer."
+  },
+  "connectButton": {
+    "message": "Connect"
+  },
+  "searching": {
+    "message": "Looking for NAJD on this computer…"
+  },
+  "notFound": {
+    "message": "NAJD was not found. Open the NAJD AGENT app on this computer, then try again."
+  },
+  "pairingTitle": {
+    "message": "Confirm in the NAJD window"
+  },
+  "pairingBody": {
+    "message": "A window in NAJD shows the same code. Allow only if the codes match."
+  },
+  "denied": {
+    "message": "The connection was declined in NAJD."
+  },
+  "expired": {
+    "message": "The request expired. Try again."
+  },
+  "busy": {
+    "message": "Too many requests. Wait a few minutes and try again."
+  },
+  "retry": {
+    "message": "Try again"
+  },
+  "siteTitle": {
+    "message": "Allow NAJD to work on websites"
+  },
+  "siteBody": {
+    "message": "To browse and act in its own tab, NAJD needs access to the sites it opens for you. It works only in the NAJD tab group and only when you ask it to."
+  },
+  "siteButton": {
+    "message": "Allow on all sites"
+  },
+  "askLabel": {
+    "message": "Ask NAJD"
+  },
+  "askPlaceholder": {
+    "message": "What should NAJD do?"
+  },
+  "includePage": {
+    "message": "Share the address and title of this page"
+  },
+  "selectionChip": {
+    "message": "Selected text included"
+  },
+  "sendButton": {
+    "message": "Send"
+  },
+  "stopButton": {
+    "message": "Stop"
+  },
+  "newAsk": {
+    "message": "New question"
+  },
+  "working": {
+    "message": "Working…"
+  },
+  "queued": {
+    "message": "Waiting for NAJD…"
+  },
+  "waitingApproval": {
+    "message": "NAJD is waiting for your approval in the app."
+  },
+  "done": {
+    "message": "Done"
+  },
+  "failed": {
+    "message": "NAJD could not finish this."
+  },
+  "cancelled": {
+    "message": "Stopped"
+  },
+  "unconfirmed": {
+    "message": "The outcome is unconfirmed. Check before trying again."
+  },
+  "copy": {
+    "message": "Copy"
+  },
+  "copied": {
+    "message": "Copied"
+  },
+  "askFailed": {
+    "message": "The question could not be sent. Is NAJD running?"
+  },
+  "tooMany": {
+    "message": "Too many questions in a minute. Wait a moment."
+  },
+  "unlinkButton": {
+    "message": "Disconnect this browser"
+  },
+  "manualTitle": {
+    "message": "Link with a code"
+  },
+  "manualHint": {
+    "message": "Paste the code from NAJD Settings → Browser. It works once."
+  },
+  "manualPlaceholder": {
+    "message": "Link code"
+  },
+  "manualButton": {
+    "message": "Link"
+  },
+  "badCode": {
+    "message": "That code is not valid or was already used."
+  },
+  "offlineHelp": {
+    "message": "NAJD is not running. Open it and this panel reconnects by itself."
+  },
+  "toolFiles": {
+    "message": "Working with files"
+  },
+  "toolSearch": {
+    "message": "Searching"
+  },
+  "toolWeb": {
+    "message": "Reading the web"
+  },
+  "toolBrowser": {
+    "message": "Using the browser"
+  },
+  "toolCommand": {
+    "message": "Running a command"
+  },
+  "toolPython": {
+    "message": "Running a script"
+  },
+  "toolSkill": {
+    "message": "Using a skill"
+  },
+  "toolDesktop": {
+    "message": "Using the desktop"
+  },
+  "toolOther": {
+    "message": "Working…"
+  },
+  "privacy": {
+    "message": "This extension talks only to the NAJD app on this computer (127.0.0.1) and stores nothing in the cloud. Your questions are answered by the AI provider you chose in NAJD."
+  },
+  "defaultSelectionQuestion": {
+    "message": "Explain this selected text."
+  },
+  "pageUnavailable": {
+    "message": "NAJD cannot read this page's address and title until website access is allowed (see above). Press Send again to ask without them, or untick the box."
+  },
+  "answerTruncated": {
+    "message": "This answer is long: only its first part is shown here and copied. The complete answer is in the NAJD conversation."
+  },
+  "selectionTooLong": {
+    "message": "The selected text is longer than NAJD takes (2,000 characters): only its beginning will be used. Press Send again to continue, or select less."
+  }
+}

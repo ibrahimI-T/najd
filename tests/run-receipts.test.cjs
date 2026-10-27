@@ -1,0 +1,65 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { createRunReceipts } = require('../electron/run-receipts.cjs')
+const { createNajdCore } = require('../electron/najd-core.cjs')
+
+const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'najd-receipts-'))
+const receipt = (total, profile = 'coding') => ({ outcome: 'completed', profile, toolsets: ['core', 'files'], toolCalls: 2,
+  usage: { input: total - 10, output: 10, total, cached: null, modelCalls: 2, partial: false }, request: { instructionsBytes: 900, toolsBytes: 2000, turnBytes: 50, historyBytes: 400, images: 0 } })
+
+test('receipts are idempotent per run, bound to their conversation and survive a restart', async () => {
+  const filePath = path.join(temp(), 'run-receipts.json')
+  const store = createRunReceipts({ filePath })
+  assert.equal(await store.record({ runId: 'run-1', conversationId: 'conv-a', state: 'COMPLETED', receipt: receipt(110) }), true)
+  assert.equal(await store.record({ runId: 'run-1', conversationId: 'conv-a', state: 'COMPLETED', receipt: receipt(999) }), false)
+  await store.record({ runId: 'run-2', conversationId: 'conv-a', state: 'CANCELLED', receipt: { ...receipt(50, 'design'), outcome: 'cancelled', usage: { input: null, output: 5, total: null, cached: 32, modelCalls: 1, partial: true } } })
+  await store.record({ runId: 'run-3', conversationId: 'conv-b', state: 'COMPLETED', receipt: receipt(70) })
+  const again = createRunReceipts({ filePath })
+  const totals = await again.totals('conv-a')
+  assert.deepEqual(totals, { runs: 2, input: 100, output: 15, total: 110, cached: 32, modelCalls: 3, toolCalls: 4, partial: true })
+  assert.equal(await again.lastProfile('conv-a'), 'design')
+  assert.equal((await again.list('conv-b')).length, 1)
+  await assert.rejects(again.record({ runId: '../x', conversationId: 'conv-a', receipt: receipt(1) }), { code: 'INVALID_INPUT' })
+})
+
+test('a corrupt receipts file is preserved, not overwritten', async () => {
+  const dir = temp(), filePath = path.join(dir, 'run-receipts.json')
+  fs.writeFileSync(filePath, '{not json')
+  const store = createRunReceipts({ filePath })
+  assert.deepEqual(await store.list('conv-a'), [])
+  assert.equal(store.corrupt(), true)
+  assert.ok(fs.readdirSync(dir).some(name => name.startsWith('run-receipts.json.corrupt-')))
+})
+
+test('the core records the receipt of a failed model run for its conversation', async () => {
+  const recorded = []
+  const core = createNajdCore({ onReceipt: entry => recorded.push(entry), model: async () => {
+    throw Object.assign(new Error('BUDGET_EXCEEDED'), { code: 'BUDGET_EXCEEDED', receipt: { ...receipt(300), outcome: 'budget' } })
+  } })
+  const task = core.startTask({ text: 'write a long script', intentId: 'b'.repeat(32), provider: 'ollama', conversationId: 'conv-z', profile: 'coding' })
+  for (let i = 0; i < 50 && !['FAILED', 'COMPLETED'].includes(core.getTask(task.id).state); i++) await new Promise(resolve => setTimeout(resolve, 10))
+  await new Promise(resolve => setTimeout(resolve, 10))
+  const done = core.getTask(task.id)
+  assert.equal(done.state, 'FAILED'); assert.equal(done.receipt.outcome, 'budget'); assert.equal(done.conversationId, 'conv-z')
+  assert.equal(recorded.length, 1); assert.equal(recorded[0].conversationId, 'conv-z'); assert.equal(recorded[0].runId, task.id)
+  assert.throws(() => core.startTask({ text: 'x', intentId: 'c'.repeat(32), provider: 'ollama', conversationId: '../../etc' }), { code: 'INVALID_INPUT' })
+})
+
+test('the context window comes from the model: listed, named, or fixed by NAJD', async () => {
+  const { modelWindow, namedWindow } = require('../electron/model-window.cjs')
+  assert.equal(modelWindow({ context_window: 272000 }, 'gpt-x'), 272000)
+  assert.equal(modelWindow({ inputTokenLimit: 1048576 }, 'gemini-x'), 1048576)
+  assert.equal(modelWindow({ context_length: 'big' }, 'k3-256k'), 256000)
+  assert.equal(namedWindow('model-1m'), 1000000)
+  assert.equal(namedWindow('kimi-for-coding'), null)
+  assert.equal(namedWindow('llama3.1:8b'), null)
+  assert.equal(modelWindow({ context_window: 12 }, 'tiny'), null)
+  const store = createRunReceipts({ filePath: path.join(temp(), 'run-receipts.json') })
+  await store.record({ runId: 'run-w', conversationId: 'conv-w', state: 'COMPLETED', receipt: receipt(10), provider: 'kimi-code', modelName: 'k3-256k', contextWindow: 256000 })
+  await store.record({ runId: 'run-o', conversationId: 'conv-w', state: 'COMPLETED', receipt: receipt(10), provider: 'ollama', modelName: 'm', contextWindow: 999999 })
+  await store.record({ runId: 'run-x', conversationId: 'conv-w', state: 'COMPLETED', receipt: receipt(10), provider: 'zai-api', modelName: 'm', contextWindow: 'huge' })
+  assert.deepEqual((await store.list('conv-w')).map(run => run.contextWindow), [256000, 16384, null])
+})

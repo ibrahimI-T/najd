@@ -1,0 +1,194 @@
+{
+  "extName": {
+    "message": "نجد AGENT — مساعد المتصفح الذكي"
+  },
+  "extDescription": {
+    "message": "يربط متصفحك بتطبيق NAJD AGENT على جهازك ليتصفح عنك وينجز المهام ويجيبك من اللوحة الجانبية. كل شيء محلي على جهازك."
+  },
+  "actionTitle": {
+    "message": "نجد AGENT"
+  },
+  "contextAskSelection": {
+    "message": "اسأل نجد عن \"%s\""
+  },
+  "contextAskPage": {
+    "message": "اسأل نجد عن هذه الصفحة"
+  },
+  "tagline": {
+    "message": "وكيلك الشخصي داخل متصفحك"
+  },
+  "statusConnected": {
+    "message": "متصل بنجد"
+  },
+  "statusOffline": {
+    "message": "نجد غير مفتوح"
+  },
+  "statusUnlinked": {
+    "message": "غير مربوط"
+  },
+  "statusPairing": {
+    "message": "بانتظار تأكيدك"
+  },
+  "statusSearching": {
+    "message": "جاري البحث عن نجد…"
+  },
+  "connectTitle": {
+    "message": "الاتصال بنجد"
+  },
+  "connectBody": {
+    "message": "اربط هذا المتصفح بتطبيق NAJD AGENT على هذا الجهاز. سيطلب نجد تأكيدك في نافذته، والربط نفسه لا يخرج من جهازك."
+  },
+  "connectButton": {
+    "message": "اتصال"
+  },
+  "searching": {
+    "message": "جاري البحث عن نجد على هذا الجهاز…"
+  },
+  "notFound": {
+    "message": "لم يُعثر على نجد. افتح تطبيق NAJD AGENT على هذا الجهاز ثم أعد المحاولة."
+  },
+  "pairingTitle": {
+    "message": "أكّد في نافذة نجد"
+  },
+  "pairingBody": {
+    "message": "تظهر في نجد نافذة بنفس الرمز. اسمح فقط إذا تطابق الرمزان."
+  },
+  "denied": {
+    "message": "رُفض الاتصال في نجد."
+  },
+  "expired": {
+    "message": "انتهت مهلة الطلب. أعد المحاولة."
+  },
+  "busy": {
+    "message": "طلبات كثيرة. انتظر دقائق ثم أعد المحاولة."
+  },
+  "retry": {
+    "message": "إعادة المحاولة"
+  },
+  "siteTitle": {
+    "message": "السماح لنجد بالعمل على المواقع"
+  },
+  "siteBody": {
+    "message": "ليتصفح نجد وينفّذ في تبويبه الخاص يحتاج الوصول إلى المواقع التي يفتحها لك. يعمل داخل مجموعة تبويبات نجد فقط وعندما تطلب منه."
+  },
+  "siteButton": {
+    "message": "السماح لكل المواقع"
+  },
+  "askLabel": {
+    "message": "اسأل نجد"
+  },
+  "askPlaceholder": {
+    "message": "ماذا تريد من نجد أن يفعل؟"
+  },
+  "includePage": {
+    "message": "مشاركة عنوان هذه الصفحة واسمها"
+  },
+  "selectionChip": {
+    "message": "النص المحدد مُضمَّن"
+  },
+  "sendButton": {
+    "message": "إرسال"
+  },
+  "stopButton": {
+    "message": "إيقاف"
+  },
+  "newAsk": {
+    "message": "سؤال جديد"
+  },
+  "working": {
+    "message": "يعمل…"
+  },
+  "queued": {
+    "message": "بانتظار نجد…"
+  },
+  "waitingApproval": {
+    "message": "نجد ينتظر موافقتك داخل التطبيق."
+  },
+  "done": {
+    "message": "تم"
+  },
+  "failed": {
+    "message": "تعذّر على نجد إكمال هذا."
+  },
+  "cancelled": {
+    "message": "أُوقف"
+  },
+  "unconfirmed": {
+    "message": "نتيجة الإجراء غير مؤكدة. تحقّق قبل أي إعادة."
+  },
+  "copy": {
+    "message": "نسخ"
+  },
+  "copied": {
+    "message": "تم النسخ"
+  },
+  "askFailed": {
+    "message": "تعذّر إرسال السؤال. هل نجد مفتوح؟"
+  },
+  "tooMany": {
+    "message": "أسئلة كثيرة في دقيقة. انتظر قليلًا."
+  },
+  "unlinkButton": {
+    "message": "فصل هذا المتصفح"
+  },
+  "manualTitle": {
+    "message": "الربط برمز"
+  },
+  "manualHint": {
+    "message": "الصق الرمز من إعدادات نجد ← المتصفح. يعمل مرة واحدة."
+  },
+  "manualPlaceholder": {
+    "message": "رمز الربط"
+  },
+  "manualButton": {
+    "message": "ربط"
+  },
+  "badCode": {
+    "message": "الرمز غير صحيح أو استُخدم من قبل."
+  },
+  "offlineHelp": {
+    "message": "نجد غير مفتوح. افتحه وتعيد هذه اللوحة الاتصال تلقائيًا."
+  },
+  "toolFiles": {
+    "message": "يعمل على الملفات"
+  },
+  "toolSearch": {
+    "message": "يبحث"
+  },
+  "toolWeb": {
+    "message": "يقرأ من الويب"
+  },
+  "toolBrowser": {
+    "message": "يستخدم المتصفح"
+  },
+  "toolCommand": {
+    "message": "ينفّذ أمرًا"
+  },
+  "toolPython": {
+    "message": "يشغّل سكربتًا"
+  },
+  "toolSkill": {
+    "message": "يستخدم مهارة"
+  },
+  "toolDesktop": {
+    "message": "يتحكم بسطح المكتب"
+  },
+  "toolOther": {
+    "message": "يعمل…"
+  },
+  "privacy": {
+    "message": "تتحدث هذه الإضافة فقط مع تطبيق نجد على هذا الجهاز (127.0.0.1) ولا تخزّن شيئًا في السحابة. أسئلتك يجيب عنها مزوّد الذكاء الاصطناعي الذي اخترته في نجد."
+  },
+  "defaultSelectionQuestion": {
+    "message": "اشرح لي هذا النص المحدد."
+  },
+  "pageUnavailable": {
+    "message": "لا يستطيع نجد قراءة عنوان هذه الصفحة واسمها قبل السماح بالوصول إلى المواقع (انظر أعلاه). اضغط إرسال مرة أخرى للسؤال بدونهما، أو ألغِ التحديد."
+  },
+  "answerTruncated": {
+    "message": "هذه الإجابة طويلة: يظهر ويُنسخ هنا جزؤها الأول فقط. الإجابة الكاملة في محادثة نجد."
+  },
+  "selectionTooLong": {
+    "message": "النص المحدد أطول مما يأخذه نجد (2000 حرف): سيُستخدم جزؤه الأول فقط. اضغط إرسال مرة أخرى للمتابعة، أو حدّد أقل."
+  }
+}

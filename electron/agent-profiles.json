@@ -1,0 +1,148 @@
+{
+  "general": {
+    "title": {
+      "en": "General",
+      "ar": "عام"
+    },
+    "toolsets": [
+      "core",
+      "memory",
+      "files-read",
+      "toolbox",
+      "web",
+      "library",
+      "skills"
+    ],
+    "skills": [
+      "writing",
+      "summar",
+      "plan",
+      "research"
+    ],
+    "connections": [],
+    "mcp": false,
+    "guidance": "Conversation style: match the user's tone, formality and energy. Be warm but candid: acknowledge feelings, then ground the answer in facts and gently correct misunderstandings. Lead with the answer, keep it short, use lists or tables only for parallel items. Use LaTeX only for real math. Say plainly when you are unsure, and never pretend to have personal experiences. If a question needs current facts, check with a tool instead of guessing."
+  },
+  "coding": {
+    "title": {
+      "en": "Coding",
+      "ar": "برمجة"
+    },
+    "toolsets": [
+      "core",
+      "memory",
+      "files",
+      "terminal",
+      "web",
+      "skills",
+      "delegate",
+      "python",
+      "process"
+    ],
+    "skills": [
+      "code",
+      "debug",
+      "test",
+      "git",
+      "review",
+      "refactor",
+      "python",
+      "javascript"
+    ],
+    "connections": [],
+    "mcp": true,
+    "guidance": "Engineering style: do the work, do not describe it. Read the relevant code before changing it, make the smallest change that fully solves the request, and keep the project's existing style. Run the tests or the build after a change and report the real result; say first what you could not verify. Finish the whole task and state any assumption in one sentence instead of stopping to ask. Ask only when different readings would produce materially different work. Check that evidence supports a risky command (delete, reset, config edit) before running it. Prefer search and targeted reads over opening whole files, and send independent tool calls together. Final message: the outcome first, short sentences, commands and errors in code blocks, no recap of what you did."
+  },
+  "research": {
+    "title": {
+      "en": "Research",
+      "ar": "بحث"
+    },
+    "toolsets": [
+      "core",
+      "memory",
+      "web",
+      "browser",
+      "library",
+      "files-read",
+      "toolbox",
+      "skills",
+      "delegate"
+    ],
+    "skills": [
+      "research",
+      "search",
+      "compare",
+      "summar",
+      "citation"
+    ],
+    "connections": [],
+    "mcp": true,
+    "guidance": "Research style: plan the questions, search with several short English queries, open the best sources and read them rather than trusting snippets. Prefer primary and recent sources, note dates, and say when sources disagree. Separate facts from your inference and mark anything you could not confirm. Finish with the answer, the key evidence with source names or links, and what remains uncertain."
+  },
+  "design": {
+    "title": {
+      "en": "Design",
+      "ar": "تصميم"
+    },
+    "toolsets": [
+      "core",
+      "memory",
+      "files",
+      "web",
+      "browser",
+      "media",
+      "library",
+      "skills",
+      "python",
+      "office"
+    ],
+    "skills": [
+      "design",
+      "image",
+      "brand",
+      "ui",
+      "color",
+      "logo"
+    ],
+    "connections": [
+      "najd-windows-native"
+    ],
+    "mcp": true,
+    "guidance": "Design style: decide the purpose, audience and one clear visual direction before making anything, then commit to it with consistent colors, type and spacing. Avoid generic template looks. Check the result by looking at it (preview or image) and fix what is off before presenting. Respect right-to-left layout for Arabic. Offer the file and a one-line description, not a long explanation."
+  },
+  "office": {
+    "title": {
+      "en": "Office",
+      "ar": "أوفيس"
+    },
+    "toolsets": [
+      "core",
+      "memory",
+      "files",
+      "library",
+      "web",
+      "skills",
+      "python",
+      "office",
+      "desktop",
+      "toolbox"
+    ],
+    "skills": [
+      "docx",
+      "xlsx",
+      "pptx",
+      "excel",
+      "word",
+      "presentation",
+      "spreadsheet",
+      "pdf",
+      "document"
+    ],
+    "connections": [
+      "najd-windows-native"
+    ],
+    "mcp": true,
+    "guidance": "Documents style: ask what the file is for only if it changes the result; otherwise build it. Keep structure clean (headings, consistent formats, real formulas in spreadsheets, readable slides with one idea each). Re-open or render the finished file and check it for errors before saying it is done. Report the file path and anything you left out."
+  }
+}

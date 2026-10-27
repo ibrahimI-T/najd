@@ -1,0 +1,5 @@
+[
+  { "id": "najd-read-document", "version": "1.0.0", "title": "Read a document", "description": "Preview one bounded local text file after separate approval.", "permission": "files:read", "tool": "read-file", "source": "NAJD built-in" },
+  { "id": "najd-find-documents", "version": "1.0.0", "title": "Find documents", "description": "Find bounded document filenames inside a granted directory.", "permission": "files:list", "tool": "find-documents", "source": "NAJD built-in" },
+  { "id": "najd-list-apps", "version": "1.0.0", "title": "Discover Windows apps", "description": "Check five fixed protected app locations after approval.", "permission": "windows:discover", "tool": "windows-apps", "source": "NAJD built-in" }
+]

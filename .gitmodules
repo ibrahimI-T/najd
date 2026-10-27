@@ -1,0 +1,9 @@
+[submodule "third_party/openclaw"]
+	path = third_party/openclaw
+	url = https://github.com/openclaw/openclaw.git
+[submodule "third_party/hermes-agent"]
+	path = third_party/hermes-agent
+	url = https://github.com/NousResearch/hermes-agent.git
+[submodule "third_party/openclaw-windows-node"]
+	path = third_party/openclaw-windows-node
+	url = https://github.com/openclaw/openclaw-windows-node.git

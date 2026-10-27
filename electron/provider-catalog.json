@@ -1,0 +1,472 @@
+[
+  {
+    "id": "chatgpt",
+    "name": "ChatGPT",
+    "kind": "subscription",
+    "auth": "browser"
+  },
+  {
+    "id": "kimi-code",
+    "name": "Kimi Code",
+    "kind": "subscription",
+    "auth": "key",
+    "keyHint": "sk-kimi-…",
+    "protocol": "kimi",
+    "models": [
+      "k3-256k",
+      "kimi-for-coding",
+      "k3",
+      "kimi-for-coding-highspeed"
+    ],
+    "consoleUrl": "https://www.kimi.com/code/console"
+  },
+  {
+    "id": "minimax-plan",
+    "name": "MiniMax M Plan",
+    "kind": "subscription",
+    "auth": "key",
+    "keyHint": "sk-cp-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.minimax.io/v1",
+    "models": [
+      "MiniMax-M3.1-Flash-Preview"
+    ],
+    "consoleUrl": "https://platform.minimax.io/console/plan",
+    "editableUrl": true
+  },
+  {
+    "id": "openai-api",
+    "name": "OpenAI",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-…",
+    "protocol": "responses",
+    "baseUrl": "https://api.openai.com/v1"
+  },
+  {
+    "id": "anthropic-api",
+    "name": "Claude",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-ant-…",
+    "protocol": "anthropic",
+    "baseUrl": "https://api.anthropic.com/v1",
+    "vision": true
+  },
+  {
+    "id": "gemini-api",
+    "name": "Gemini",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "AIza…",
+    "protocol": "gemini",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "vision": true
+  },
+  {
+    "id": "openrouter-api",
+    "name": "OpenRouter",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-or-v1-…",
+    "protocol": "chat",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "vision": true,
+    "editableUrl": true
+  },
+  {
+    "id": "deepseek-api",
+    "name": "DeepSeek",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "mistral-api",
+    "name": "Mistral",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.mistral.ai/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "groq-api",
+    "name": "Groq",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "gsk_…",
+    "protocol": "chat",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "xai-api",
+    "name": "xAI · Grok",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "xai-…",
+    "protocol": "responses",
+    "baseUrl": "https://api.x.ai/v1",
+    "vision": true
+  },
+  {
+    "id": "zai-api",
+    "name": "Z.AI · GLM",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.z.ai/api/paas/v4",
+    "models": [
+      "glm-5.3",
+      "glm-5.3-flash"
+    ],
+    "editableUrl": true
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama",
+    "kind": "local",
+    "auth": "local"
+  },
+  {
+    "id": "zai-coding",
+    "name": "Z.AI · GLM Coding Plan",
+    "kind": "subscription",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "editableUrl": true,
+    "models": [
+      "glm-5.1",
+      "glm-5",
+      "glm-5-turbo",
+      "glm-4.7",
+      "glm-4.5-air"
+    ],
+    "consoleUrl": "https://z.ai/manage-apikey/apikey-list"
+  },
+  {
+    "id": "alibaba-coding",
+    "name": "Alibaba · Qwen Coding Plan",
+    "kind": "subscription",
+    "auth": "key",
+    "keyHint": "sk-sp-…",
+    "protocol": "chat",
+    "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
+    "editableUrl": true,
+    "consoleUrl": "https://bailian.console.alibabacloud.com/"
+  },
+  {
+    "id": "together-api",
+    "name": "Together AI",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.together.xyz/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "fireworks-api",
+    "name": "Fireworks AI",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "fw_…",
+    "protocol": "chat",
+    "baseUrl": "https://api.fireworks.ai/inference/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "cerebras-api",
+    "name": "Cerebras",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "csk-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.cerebras.ai/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "sambanova-api",
+    "name": "SambaNova",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.sambanova.ai/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "nvidia-api",
+    "name": "NVIDIA NIM",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "nvapi-…",
+    "protocol": "chat",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "huggingface-api",
+    "name": "Hugging Face",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "hf_…",
+    "protocol": "chat",
+    "baseUrl": "https://router.huggingface.co/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "github-models-api",
+    "name": "GitHub Models",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "ghp_… / github_pat_…",
+    "protocol": "chat",
+    "baseUrl": "https://models.github.ai/inference",
+    "editableUrl": true
+  },
+  {
+    "id": "moonshot-api",
+    "name": "Moonshot · Kimi API",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.moonshot.ai/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "deepinfra-api",
+    "name": "DeepInfra",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.deepinfra.com/v1/openai",
+    "editableUrl": true
+  },
+  {
+    "id": "hyperbolic-api",
+    "name": "Hyperbolic",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.hyperbolic.xyz/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "novita-api",
+    "name": "Novita AI",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.novita.ai/v3/openai",
+    "editableUrl": true
+  },
+  {
+    "id": "nebius-api",
+    "name": "Nebius AI Studio",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.studio.nebius.com/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "siliconflow-api",
+    "name": "SiliconFlow",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.siliconflow.com/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "venice-api",
+    "name": "Venice",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.venice.ai/api/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "cohere-api",
+    "name": "Cohere",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.cohere.ai/compatibility/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "perplexity-api",
+    "name": "Perplexity",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "pplx-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.perplexity.ai",
+    "editableUrl": true
+  },
+  {
+    "id": "dashscope-api",
+    "name": "Alibaba · Qwen (pay as you go)",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-…",
+    "protocol": "chat",
+    "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "volcengine-api",
+    "name": "ByteDance · Volcano Ark",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "editableUrl": true
+  },
+  {
+    "id": "stepfun-api",
+    "name": "StepFun",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "API key",
+    "protocol": "chat",
+    "baseUrl": "https://api.stepfun.com/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "hunyuan-api",
+    "name": "Tencent · Hunyuan",
+    "kind": "api",
+    "auth": "key",
+    "keyHint": "sk-…",
+    "protocol": "chat",
+    "baseUrl": "https://api.hunyuan.cloud.tencent.com/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "openai-compatible",
+    "name": "Any OpenAI-compatible service",
+    "kind": "api",
+    "auth": "optional-key",
+    "keyHint": "API key (if the service needs one)",
+    "protocol": "chat",
+    "baseUrl": "",
+    "editableUrl": true
+  },
+  {
+    "id": "lmstudio",
+    "name": "LM Studio",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:1234/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "llamacpp",
+    "name": "llama.cpp server",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:8080/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "vllm",
+    "name": "vLLM",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:8000/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "jan",
+    "name": "Jan",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:1337/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "localai",
+    "name": "LocalAI",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:8081/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "textgen",
+    "name": "text-generation-webui",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:5000/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "koboldcpp",
+    "name": "KoboldCpp",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:5001/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "gpt4all",
+    "name": "GPT4All",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "http://127.0.0.1:4891/v1",
+    "editableUrl": true
+  },
+  {
+    "id": "local-compatible",
+    "name": "Other local server",
+    "kind": "local",
+    "auth": "optional-key",
+    "keyHint": "Key (only if the server needs one)",
+    "protocol": "chat",
+    "baseUrl": "",
+    "editableUrl": true
+  },
+  {
+    "id": "union",
+    "name": "Model union (Mixture of Agents)",
+    "kind": "union",
+    "auth": "union"
+  }
+]

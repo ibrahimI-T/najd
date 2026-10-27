@@ -1,0 +1,20 @@
+{
+  "format": "najd-core-notice-sources-v1",
+  "note": "Authoritative, version-matched notices for distributions whose sdist/wheel omit them. Each URL names an immutable commit; the tag-to-commit mapping is recorded as evidence.",
+  "sources": [
+    {
+      "packages": ["winrt-runtime", "winrt-Windows.ApplicationModel", "winrt-Windows.Foundation", "winrt-Windows.Foundation.Collections", "winrt-Windows.Services.Store"],
+      "version": "3.2.1",
+      "url": "https://raw.githubusercontent.com/pywinrt/pywinrt/21cbd0fd7ff91422ed76b4e3611d3fb52716e017/LICENSE",
+      "sha256": "6e898069e8b3c6d8d23dc70ac7067cc2b7c9db14c36df873026758db82c0891d",
+      "size": 1225,
+      "evidence": "Each package's metadata names Repository https://github.com/pywinrt/pywinrt; git ls-remote refs/tags/v3.2.1 -> 21cbd0fd7ff91422ed76b4e3611d3fb52716e017 (2026-10-16)."
+    }
+  ],
+  "excluded": [
+    {
+      "package": "fetch-use", "version": "0.4.0",
+      "reason": "No license/notice text in its sdist or wheel and its declared repository is not public. It is only imported lazily by browser-harness when BROWSER_USE_API_KEY is set, with an ImportError fallback to local HTTP, so the redistributed core omits it."
+    }
+  ]
+}

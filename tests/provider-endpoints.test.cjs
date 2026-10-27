@@ -1,0 +1,68 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs/promises')
+const os = require('node:os')
+const path = require('node:path')
+const { validateEndpoint, privateHost, createEndpointStore } = require('../electron/provider-endpoints.cjs')
+const { createProviderService } = require('../electron/provider-service.cjs')
+
+test('addresses: https anywhere, http only for this computer or a private network, no credentials, queries or odd schemes', () => {
+  assert.equal(validateEndpoint('https://api.example.com/v1/'), 'https://api.example.com/v1')
+  assert.equal(validateEndpoint('http://127.0.0.1:1234/v1'), 'http://127.0.0.1:1234/v1')
+  assert.equal(validateEndpoint('http://192.168.1.20:8080/v1'), 'http://192.168.1.20:8080/v1')
+  assert.equal(validateEndpoint('http://my-pc.local:5000/v1'), 'http://my-pc.local:5000/v1')
+  for (const bad of ['http://api.example.com/v1', 'ftp://x/v1', 'file:///C:/x', 'javascript:alert(1)', 'https://user:pw@api.example.com/v1', 'https://api.example.com/v1?key=1', 'https://api.example.com/v1#x', '', '   ', 'not a url', 'http://8.8.8.8/v1', 'x'.repeat(400)])
+    assert.throws(() => validateEndpoint(bad), { code: 'INVALID_ENDPOINT' }, bad)
+  assert.equal(privateHost('172.20.0.5'), true); assert.equal(privateHost('172.32.0.5'), false); assert.equal(privateHost('100.100.1.1'), true); assert.equal(privateHost('[::1]'), true)
+})
+
+test('the endpoint store keeps only validated addresses and preserves a corrupt file', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-endpoints-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const file = path.join(root, 'endpoints.json'), store = createEndpointStore({ filePath: file })
+  assert.equal(await store.set('lmstudio', 'http://127.0.0.1:4321/v1/'), 'http://127.0.0.1:4321/v1')
+  assert.deepEqual(await createEndpointStore({ filePath: file }).all(), { lmstudio: 'http://127.0.0.1:4321/v1' })
+  assert.equal(await store.set('lmstudio', ''), null)
+  await assert.rejects(store.set('lmstudio', 'http://evil.example.com/v1'), { code: 'INVALID_ENDPOINT' })
+  await assert.rejects(store.set('../x', 'https://a.example/v1'), { code: 'INVALID_INPUT' })
+  await fs.writeFile(file, '{broken')
+  await assert.rejects(store.set('jan', 'http://127.0.0.1:1337/v1'), { code: 'ENDPOINTS_UNAVAILABLE' })
+  assert.equal(await fs.readFile(file, 'utf8'), '{broken')
+})
+
+test('a local server needs no key: models and chat work, the address can change, and routes are identified by address', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-local-provider-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const built = []
+  const service = createProviderService({ directory: root, encryption: { isAsyncEncryptionAvailable: async () => false }, chatGPT: { status: async () => ({ signedIn: false }) }, ollama: { listModels: async () => [] },
+    clientFactory: (id, options) => { built.push([id, options?.baseUrl]); return { listModels: async key => { assert.equal(key, null); return [{ id: 'qwen', label: 'Qwen' }] }, chat: async ({ apiKey }) => { assert.equal(apiKey, null); return { kind: 'message', text: 'local hello' } } } } })
+  t.after(() => service.dispose())
+  const entry = (await service.catalog()).find(p => p.id === 'lmstudio')
+  assert.equal(entry.kind, 'local'); assert.equal(entry.configured, true); assert.equal(entry.endpoint, 'http://127.0.0.1:1234/v1'); assert.equal(entry.editableUrl, true)
+  assert.deepEqual((await service.models('lmstudio')).map(m => m.id), ['qwen'])
+  assert.equal((await service.chat({ provider: 'lmstudio', modelName: 'qwen', history: [{ role: 'user', text: 'hi' }] })).text, 'local hello')
+  assert.equal(await service.supportsTools('lmstudio', 'qwen'), true)
+  const routeA = await service.captureRoute('lmstudio')
+  await service.setEndpoint('lmstudio', 'http://192.168.1.50:1234/v1')
+  assert.notEqual(await service.captureRoute('lmstudio'), routeA, 'a different address is a different route')
+  await service.chat({ provider: 'lmstudio', modelName: 'qwen', history: [{ role: 'user', text: 'hi' }] })
+  assert.deepEqual(built.map(item => item[1]), ['http://127.0.0.1:1234/v1', 'http://192.168.1.50:1234/v1'])
+  await assert.rejects(service.chat({ provider: 'lmstudio', modelName: 'qwen', history: [{ role: 'user', text: 'hi' }], routeToken: routeA }), { code: 'CREDENTIAL_CHANGED' })
+  await assert.rejects(service.setEndpoint('lmstudio', 'http://public.example.com/v1'), { code: 'INVALID_ENDPOINT' })
+  await assert.rejects(service.setEndpoint('openai-api', 'https://x.example/v1'), { code: 'INVALID_INPUT' })
+  // A custom OpenAI-compatible service has no address until one is given.
+  assert.equal((await service.catalog()).find(p => p.id === 'openai-compatible').configured, false)
+  await service.setEndpoint('openai-compatible', 'https://gateway.example.com/v1')
+  assert.equal((await service.catalog()).find(p => p.id === 'openai-compatible').configured, true)
+})
+
+test('detectLocal reports only servers that answer', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-detect-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const service = createProviderService({ directory: root, encryption: { isAsyncEncryptionAvailable: async () => false }, chatGPT: { status: async () => ({ signedIn: false }) }, ollama: { listModels: async () => [] }, clientFactory: () => ({}) })
+  t.after(() => service.dispose())
+  const asked = []
+  const found = await service.detectLocal(async url => { asked.push(url); if (url.startsWith('http://127.0.0.1:1234')) return { ok: true }; throw new Error('down') })
+  assert.deepEqual(found.map(item => item.id), ['lmstudio'])
+  assert.ok(asked.every(url => url.startsWith('http://127.0.0.1:') && url.endsWith('/models')), 'only this computer is probed')
+})

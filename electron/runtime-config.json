@@ -1,0 +1,5 @@
+{
+  "catalogVersion": "0.1.0",
+  "channel": "main",
+  "components": ["agent-core"]
+}

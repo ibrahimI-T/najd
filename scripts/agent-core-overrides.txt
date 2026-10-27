@@ -1,0 +1,6 @@
+# Reviewed downstream security overrides for the sealed NAJD agent core (2026-10-16).
+# Upstream hermes-agent c70332f pins PyJWT==2.13.0 and urllib3>=2.7.0. Exact public advisories:
+# PyJWT 2.13.0: 16 CVEs fixed in 2.14.0/2.15.0 (incl. GHSA-gvp8-978c-rx2q per upstream CHANGELOG 2.14.0).
+# urllib3 2.7.0: 3 CVEs fixed in 2.8.0. Both wheels are pure Python; installed --no-deps with hashes.
+PyJWT==2.15.1 --hash=sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193
+urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3

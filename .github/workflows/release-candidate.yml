@@ -1,0 +1,40 @@
+name: Windows release candidate
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version already committed in package.json
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      REQUESTED_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: node -e "if(process.env.REQUESTED_VERSION !== require('./package.json').version) throw new Error('Commit the exact release version first')"
+      - run: npm.cmd install --global npm@11.12.1
+      - run: npm.cmd ci
+      - run: npm.cmd run setup:electron
+      - run: npm.cmd test
+      - run: npm.cmd audit --omit=dev --audit-level=high
+      - run: npm.cmd run dist -- --config.directories.output=release/candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: najd-windows-candidate
+          path: |
+            release/candidate/*.exe
+            release/candidate/*.blockmap
+            release/candidate/latest.yml
+          retention-days: 7
+          if-no-files-found: error
+      - shell: pwsh
+        run: Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Candidate only. Publisher must verify, sign the authenticated manifest and explicitly publish. No signing key or publishing token is embedded.'
