@@ -45,8 +45,13 @@ function gitState(root) {
   const run = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
   const commit = run(['rev-parse', 'HEAD'])
   // Local changes anywhere except the pinned upstream submodules make the tree unclean.
-  const dirty = run(['status', '--porcelain', '--untracked-files=no']).split('\n').filter(line => line && !/^\s?[mM?]\s+third_party\//.test(line) && !/ third_party\//.test(line))
-  return { commit, clean: dirty.length === 0 }
+  // Untracked files count too, and so do ignored files inside the packaged source folders (electron/, browser-extension/),
+  // which electron-builder would copy into the installer. Python bytecode caches are left out of the installer by
+  // package.json build.files ("!**/__pycache__/**"), so under electron/ they cannot ship and are not counted (browser-extension/ is copied whole, so nothing there is exempt).
+  const dirty = run(['status', '--porcelain', '--untracked-files=all']).split('\n').filter(line => line && !/^\s?[mM?]\s+third_party\//.test(line) && !/ third_party\//.test(line))
+  const ignoredPackaged = run(['ls-files', '--others', '--ignored', '--exclude-standard', '--', 'electron', 'browser-extension']).split('\n')
+    .filter(file => file && !/^electron\/(.*\/)?__pycache__\/[^/]+\.pyc$/.test(file))
+  return { commit, clean: dirty.length === 0 && ignoredPackaged.length === 0 }
 }
 
 function installerPath(root, version) { return path.join(root, 'release', version, `NAJD-AGENT-Setup-${version}.exe`) }
@@ -87,7 +92,7 @@ function runGates(root = path.resolve(__dirname, '..')) {
   if (problems.length) { console.error('Gates not satisfied: ' + problems.join(', ')); process.exitCode = 1 } else console.log('All release gates passed for ' + endState.commit.slice(0, 8))
 }
 
-module.exports = { GATES, MAX_AGE_HOURS, checkEvidence, assertEvidence, runGates, sha512File }
+module.exports = { GATES, MAX_AGE_HOURS, checkEvidence, assertEvidence, runGates, sha512File, gitState }
 if (require.main === module) {
   if (process.argv[2] === '--run') runGates()
   else { try { assertEvidence(); console.log('Gate evidence is valid.') } catch (error) { console.error(error.message); process.exitCode = 1 } }

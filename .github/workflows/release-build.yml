@@ -9,12 +9,22 @@ on:
         description: Version already committed in package.json
         required: true
         type: string
+      publish:
+        description: Publish the attested installer as a GitHub release of this repository
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 150
+    # GitHub's free build provenance: a signed statement that this installer was built here from this commit.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    timeout-minutes: 330
     env:
       REQUESTED_VERSION: ${{ inputs.version }}
       ENGINE_PACK: .runtimes/runtime-packs/agent-core-ci
@@ -47,14 +57,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Engine staging failed' }
       - run: node scripts/stage-bundle.cjs --engine ${{ env.ENGINE_PACK }}
       - run: node scripts/sync-installer-size.cjs
-      - run: npm.cmd test
-      - run: npm.cmd audit --omit=dev --audit-level=high
-      - run: npm.cmd run dist -- --config.directories.output=release/ci
+      # The release gates require a clean tree for the exact commit, so the committed installer size must already match.
+      - name: Require the committed installer size
+        shell: pwsh
+        run: |
+          git diff --exit-code -- build/installer.nsh
+          if ($LASTEXITCODE -ne 0) { throw 'build/installer.nsh AddSize differs from this bundle; commit the value above first' }
+      - run: npm.cmd run dist -- --config.directories.output=release/${{ inputs.version }}
+      # The same enforced gates as a local release (tests, build, notices, audit, desktop, UX, prepare, package),
+      # recorded as evidence for this commit and this installer, and checked before anything is attested or published.
+      - name: Release gates
+        env:
+          NAJD_TEST_PACKAGE_DIR: release/${{ inputs.version }}
+        run: |
+          node scripts/release-gates.cjs --run
+          if ($LASTEXITCODE -ne 0) { throw 'Release gates failed' }
+          node scripts/release-gates.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Release gate evidence is not valid' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: unsigned
         with:
           name: najd-windows-unsigned
-          path: release/ci/NAJD-AGENT-Setup-*.exe
+          path: |
+            release/${{ inputs.version }}/NAJD-AGENT-Setup-*.exe
+            release/${{ inputs.version }}/gate-evidence.json
           retention-days: 14
           if-no-files-found: error
       # SignPath Foundation signing. Enable after the project is approved: add the repository secret
@@ -71,5 +97,54 @@ jobs:
           github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
           wait-for-completion: true
           output-artifact-directory: release/signed
+      - name: Name the public installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release/public | Out-Null
+          Copy-Item -LiteralPath "release/$env:REQUESTED_VERSION/NAJD-AGENT-Setup-$env:REQUESTED_VERSION.exe" -Destination release/public/NAJD-AGENT-Setup.exe
+          $hash = (Get-FileHash -Algorithm SHA256 release/public/NAJD-AGENT-Setup.exe).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath release/public/NAJD-AGENT-Setup.exe.sha256 -Value "$hash *NAJD-AGENT-Setup.exe" -Encoding ascii -NoNewline
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: release/public/NAJD-AGENT-Setup.exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: najd-windows-attested
+          path: release/public/
+          retention-days: 14
+          if-no-files-found: error
       - shell: pwsh
-        run: Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Unsigned installer built from pinned sources. Publishing stays a separate, explicit owner step.'
+        run: Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Installer built from pinned sources with GitHub build provenance. Publishing runs only when requested.'
+  publish:
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    # Only this job can write releases, and it runs no project code. It publishes to this repository only: the release
+    # has no signed najd-update.json, so it serves 0.10.7+ installations (which read this repository and offer a manual
+    # update); signed releases for older installations still go through scripts/publish-release.cjs to legacyRepos too.
+    permissions:
+      contents: write
+    env:
+      REQUESTED_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: najd-windows-attested
+          path: public
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd public
+          sha256sum -c NAJD-AGENT-Setup.exe.sha256
+          hash=$(cut -d' ' -f1 NAJD-AGENT-Setup.exe.sha256)
+          {
+            echo "Built by GitHub Actions from this repository's source at ${GITHUB_SHA}, with GitHub build provenance."
+            echo
+            echo "Download NAJD-AGENT-Setup.exe and run it. Your chats and settings are kept."
+            echo
+            echo "Check that it was built here, with the GitHub CLI: gh attestation verify NAJD-AGENT-Setup.exe --repo ${GITHUB_REPOSITORY}"
+            echo
+            echo "SHA-256: ${hash}"
+          } > ../notes.md
+          gh release create "v${REQUESTED_VERSION}" NAJD-AGENT-Setup.exe NAJD-AGENT-Setup.exe.sha256 --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "NAJD AGENT ${REQUESTED_VERSION}" --notes-file ../notes.md --latest
