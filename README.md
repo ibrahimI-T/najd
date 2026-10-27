@@ -76,7 +76,7 @@ NAJD builds on [OpenClaw](https://github.com/openclaw/openclaw), [Hermes Agent](
 
 ## Community
 
-Questions, ideas and bug reports: join the [NAJD Discord](https://discord.gg/QAbYVEdcE) or open an issue.
+Questions, ideas and bug reports: join the [NAJD Discord](https://discord.gg/QAbYVEdcE) or open an issue. If NAJD helps you, a star on this repository is appreciated.
 
 ---
 
