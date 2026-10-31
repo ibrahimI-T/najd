@@ -853,6 +853,11 @@ Rephrase the request or try another model.`
       if (result?.kind !== 'agent-tools' || !Array.isArray(result.calls) || result.calls.length !== 1 || !Array.isArray(result.items)) throw error('INVALID_MODEL_OUTPUT')
       if (++callsUsed > maxCalls) throw error('BUDGET_EXCEEDED')
       const call = result.calls[0]
+      // The arguments NAJD replays to the provider for this call (its function_call item carries the same call id).
+      const replace = (target, text) => {
+        target.arguments = text
+        result.items = result.items.map(item => item?.type === 'function_call' && item.call_id === target.call_id ? { ...item, arguments: text } : item)
+      }
       // The run scope is re-checked at execution, not only when a schema was offered (AP-001).
       // A model may call a tool it knows from earlier turns: load its toolset when it is ready and allowed for this
       // run scope (the tool keeps its own policy and approvals); anything else is invalid.
@@ -868,6 +873,8 @@ Rephrase the request or try another model.`
       if (typeof call?.call_id !== 'string' || !call.call_id || call.call_id.length > 160 || seen.has(call.call_id) || typeof call.arguments !== 'string' ||
           call.arguments.length > 400000 || typeof call.name !== 'string') throw error('INVALID_MODEL_OUTPUT')
       seen.add(call.call_id)
+      // Kimi sends "" for a tool without parameters: that is {} (owner live test 2026-10-31, najd_desktop_windows).
+      if (!call.arguments.trim()) replace(call, '{}')
       const limit = { 'files.write': 210000, 'python.run': 100000, 'files.edit': 100000 }[definition?.operation] || 8192
       let args = null, problem = null
       if (!definition) problem = { error: 'UNKNOWN_TOOL', hint: 'There is no tool named ' + call.name.slice(0, 64) + ' here. Use a listed tool, or load its toolset with najd_tools_load.' }
@@ -888,6 +895,11 @@ Rephrase the request or try another model.`
         onEvent('tool.failed', definition ? definition.name.replaceAll('_', '-') : 'najd-tool', 'error: ' + problem.error + (times > 1 ? ' · repeated' : ''))
         if (times >= REPAIR.identical || invalidStreak >= REPAIR.streak) return await stopForRepair(problem, times >= REPAIR.identical ? 'identical' : 'streak')
         const left = Math.min(REPAIR.identical - times, REPAIR.streak - invalidStreak)
+        // A call that is not one JSON object is replayed as {}: providers and their converters reject unparsable arguments,
+        // which ended the task as INVALID_INPUT on the next request. The answer below still names the real problem.
+        let parsable = false
+        try { const value = JSON.parse(call.arguments); parsable = !!value && typeof value === 'object' && !Array.isArray(value) } catch {}
+        if (!parsable || problem.error === 'ARGUMENTS_TOO_LONG') replace(call, '{}')
         input.push(...result.items, { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ ...problem,
           ...(times > 1 ? { repeated: true, hint: 'This is the same invalid call as before; sending it again does not change the answer. ' + problem.hint } : {}),
           attemptsLeft: left, note: left === 1 ? 'One more invalid call ends this task. Correct the call, use another tool, or answer the user.' : undefined }) })

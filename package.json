@@ -1,7 +1,7 @@
 {
   "name": "najd-agent",
   "private": true,
-  "version": "0.10.18",
+  "version": "0.10.19",
   "packageManager": "npm@11.12.1",
   "type": "module",
   "main": "electron/main.cjs",

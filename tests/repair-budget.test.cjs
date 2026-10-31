@@ -175,3 +175,38 @@ test('a cancel during recovery with discovery in between ends as cancelled witho
   const { failure, calls } = await drive(turns, { signal: controller.signal })
   assert.equal(failure?.code, 'CANCELLED'); assert.equal(calls(), 3)
 })
+
+// Owner live test 2026-10-31 (Kimi k3): najd_desktop_windows was called with empty arguments, refused as INVALID_ARGUMENTS,
+// and the next request failed as INVALID_INPUT because the unparsable call was replayed to the provider: one bad call ended
+// the task. A call as the model sent it (items included) is replayed through every non-Responses converter here.
+const { chatMessages } = require('../electron/chat-tools.cjs')
+const { anthropicRequest, geminiRequest } = require('../electron/provider-agent.cjs')
+const sent = (name, args, id) => ({ kind: 'agent-tools', calls: [{ name, arguments: args, call_id: id }], items: [{ type: 'function_call', name, arguments: args, call_id: id }] })
+const replay = input => {
+  chatMessages({ history: [], input, dialect: 'openai' }); chatMessages({ history: [], input, dialect: 'ollama' })
+  anthropicRequest({ history: [], input, tools: [] }); geminiRequest({ history: [], input, tools: [] })
+}
+const desktop = () => ({ available: () => true, windows: async () => ({ windows: [{ id: 'w1', title: 'Fixture', app: 'notepad' }] }) })
+
+test('a tool without parameters called with empty arguments runs as {}', async () => {
+  for (const empty of ['', '  ']) {
+    const replays = []
+    const turns = [sent('najd_desktop_windows', empty, 'd1')]
+    const { outputs, result } = await drive(turns, { extra: { desktop: desktop() } })
+    assert.equal(outputs[0].error, undefined, JSON.stringify(outputs[0]))
+    assert.equal(outputs[0].windows[0].id, 'w1')
+    assert.equal(result.text, 'finished')
+  }
+})
+
+test('an unparsable call is answered and the next request can still be sent to every provider dialect', async () => {
+  for (const raw of ['{"query": ', 'not json', '[1,2]', '"text"']) {
+    let replayFailure = null
+    const turns = [sent('najd_capabilities_search', raw, 'b1'), { kind: 'message', text: 'done' }]
+    const runtime = createAgentRuntime({ catalog: { search: async () => [], details: async () => ({}), summary: async () => '' }, library: { list: async () => [] } })
+    const result = await runtime.run({ request: { text: 'Do the task.', conversationId: 'replay' }, requestApproval: async () => 'DENY',
+      respond: async ({ input }) => { try { replay(input) } catch (error) { replayFailure ||= error }; return turns.shift() } })
+    assert.equal(replayFailure, null, 'replay of ' + JSON.stringify(raw) + ' failed: ' + replayFailure?.code)
+    assert.equal(result.text, 'done')
+  }
+})
