@@ -14,7 +14,11 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), fss = require('node:fs'), path = require('node:path'), os = require('node:os')
 const { launch, stop } = require('./electron-ui-smoke.cjs')
 
-const model = process.argv[2] || 'qwen3-vl:4b-instruct'
+// "kimi-code/<model>" runs the Kimi Code service with a key from NAJD_ACCEPT_KIMI_KEY, saved only into this run's temporary
+// profile (deleted afterwards) and never printed or written to the results; anything else is a local Ollama model.
+const requested = process.argv[2] || 'qwen3-vl:4b-instruct'
+const provider = requested.startsWith('kimi-code/') ? 'kimi-code' : 'ollama'
+const model = provider === 'kimi-code' ? requested.slice('kimi-code/'.length) : requested
 const only = (process.argv[3] || '').split(',').filter(Boolean)
 const { spawn } = require('node:child_process')
 const FIXTURE = 'NAJD Vision Fixture ' + Math.random().toString(36).slice(2, 8)
@@ -46,7 +50,9 @@ const WORKFLOWS = {
       const html = await fs.readFile(file, 'utf8').catch(() => null)
       const events = task.activity?.events || []
       const tested = events.some(step => step.tool === 'najd-web-preview' && step.type === 'tool.started')
-      return { ok: !!html && /button/i.test(html), tested, detail: html ? html.length + ' characters' : 'missing' }
+      // Verified by the preview's own steps: the buttons were clicked and every check passed.
+      const stepsPassed = events.some(step => step.tool === 'najd-web-preview' && step.type === 'tool.completed' && /steps (\d+)\/\1 passed/.test(String(step.detail || '')))
+      return { ok: !!html && /button/i.test(html) && stepsPassed, tested, detail: html ? html.length + ' characters' : 'missing' }
     } },
   research: { text: 'ابحث عن آخر إصدار مستقر من Python من المصادر الرسمية (python.org) واذكر رقم الإصدار وتاريخه مع الرابط.',
     check: async ({ task }) => ({ ok: /3\.\d+\.\d+/.test(task.output || '') && /python\.org/.test(task.output || ''), detail: task.output?.slice(0, 400) }) },
@@ -79,8 +85,13 @@ $form.Controls.Add($label); [System.Windows.Forms.Application]::Run($form)`], { 
       assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails))
       return result.result.value
     }
+    if (provider === 'kimi-code') {
+      if (!/^sk-kimi-\S+$/.test(process.env.NAJD_ACCEPT_KIMI_KEY || '')) throw new Error('Set NAJD_ACCEPT_KIMI_KEY for a Kimi run')
+      await run(`window.najdKimi.saveKey(${JSON.stringify(process.env.NAJD_ACCEPT_KIMI_KEY)}).then(() => true)`)
+      await run(`window.najdKimi.testModel(${JSON.stringify(model)}).then(() => true)`)
+    }
     async function chat(text, conversationId, policy) {
-      let task = await run(`window.najdCore.startTask(${JSON.stringify(text)},crypto.randomUUID(),'ollama',${JSON.stringify(model)},[{role:'user',text:${JSON.stringify(text)}}],'auto',[],${JSON.stringify(conversationId)})`)
+      let task = await run(`window.najdCore.startTask(${JSON.stringify(text)},crypto.randomUUID(),${JSON.stringify(provider)},${JSON.stringify(model)},[{role:'user',text:${JSON.stringify(text)}}],'auto',[],${JSON.stringify(conversationId)})`)
       const approvals = []
       const started = Date.now()
       while (!['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN_EFFECT'].includes(task.state) && Date.now() - started < 15 * 60000) {
@@ -119,8 +130,8 @@ $form.Controls.Add($label); [System.Windows.Forms.Application]::Run($form)`], { 
     try { fixture?.kill() } catch {}
     const out = path.join(__dirname, '..', 'release', 'qa-real-model')
     await fs.mkdir(out, { recursive: true })
-    const file = path.join(out, model.replace(/[^a-z0-9.-]+/gi, '_') + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json')
-    await fs.writeFile(file, JSON.stringify({ model, at: new Date().toISOString(), note: 'Real local model through the isolated desktop app; scripted approval policy.', results }, null, 2))
+    const file = path.join(out, (provider === 'ollama' ? '' : provider + '-') + model.replace(/[^a-z0-9.-]+/gi, '_') + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json')
+    await fs.writeFile(file, JSON.stringify({ provider, model, at: new Date().toISOString(), note: 'Real model (' + provider + ') through the isolated desktop app; scripted approval policy.', results }, null, 2))
     console.log('Results: ' + file)
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep) || !path.basename(root).startsWith('najd-desktop-test-')) throw Error('Unsafe cleanup')
     for (const dir of [root, docs]) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }).catch(() => {})

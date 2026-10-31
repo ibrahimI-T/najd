@@ -92,6 +92,13 @@ const workspaceOperations = { 'toolbox.run': ['project.read', 'project'], 'files
 // A server, watcher or dev command never ends, so najd_terminal_run would wait its 60 s and end with an unknown effect
 // (owner live test 2026-10-31: Python and PowerShell web servers were started, timed out and restarted in a loop).
 const LONG_RUNNING = /(\bhttp\.server\b|SimpleHTTPServer|\bhttp-server\b|\blive-server\b|\bnpx(\.cmd)?\s+serve\b|\b(npm|pnpm|yarn)(\.cmd)?\s+(run\s+)?(dev|start|serve|watch|preview)\b|\bvite(\.cmd)?(?!\s+build)(\s|$)|\bnext\s+dev\b|\bnodemon\b|\s--watch\b|HttpListener|\bwhile\s*\(\s*\$true\s*\))/i
+// A call's identity for loop and repeat checks: object keys in sorted order at every level, so the same request in a
+// different key order (or under a new call_id) is the same call.
+const stable = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
+// Orchestration, not task progress: discovery, guide reading and tool loading (a successful one never ends a repair streak).
+const ORCHESTRATION = new Set(['capabilities.search', 'capabilities.details', 'skills.read', 'extensions.search', 'tools.load', 'plan.update'])
+// Repair budget for calls NAJD cannot run (owner review 2026-10-31: eight identical UNKNOWN_TOOL errors were accepted).
+const REPAIR = { streak: 6, identical: 3 }
 // Deterministic observations: repeating one unchanged after a failure cannot succeed unless NAJD changed something since.
 // Windows, processes, the network and previews change on their own, so they are not listed.
 const OBSERVING = new Set(['files.read', 'files.list', 'files.search', 'toolbox.run', 'skills.read', 'capabilities.details', 'library.read', 'logs.read', 'chats.read'])
@@ -130,7 +137,7 @@ function startDetail(operation, args) {
   if (operation === 'desktop.act') return clip(args.action + ' · ' + args.element)
   if (operation === 'process.output' || operation === 'process.stop') return clip(args.id)
   if (operation === 'capabilities.search' || operation === 'library.search' || operation === 'knowledge.search' || operation === 'web.search' || operation === 'chats.search') return clip(args.query)
-  if (operation === 'web.preview') return clip(args.target)
+  if (operation === 'web.preview') return clip((/^http:/i.test(String(args.target || '')) && /"(click|fill)"/.test(String(args.steps || '')) ? 'interact · ' : '') + args.target)
   if (operation === 'web.extract') return clip(args.url)
   if (operation === 'capabilities.details' || operation === 'skills.read' || operation === 'library.read') return clip(args.id)
   if (operation === 'agent.delegate') return clip(args.task)
@@ -532,8 +539,9 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
     // Main-owned run receipt (AP-004): returned on success and attached to every failure, so cancelled or failed
     // runs still report what they used. Tool and model calls include delegated sub-agents exactly once.
     // The exact accumulator travels with the receipt (not enumerable, so it is never stored) for merging into a parent.
+    let invalidTotal = 0 // calls NAJD could not run (validation failures), reported in the receipt
     const receipt = outcome => Object.defineProperty({ outcome, profile: selection.profile, profileReason: selection.reason, toolsets: tools.loaded(),
-      usage: usageView(usage), toolCalls: callsUsed + childToolCalls, request: lastRequest }, 'usageRaw', { value: usage })
+      usage: usageView(usage), toolCalls: callsUsed + childToolCalls, ...(invalidTotal ? { invalidCalls: invalidTotal } : {}), request: lastRequest }, 'usageRaw', { value: usage })
     // Everything after this point attaches the receipt to a failure (the try spans the rest of run()).
     try {
     // Safe reasoning summary (owner request 2026-10-21): composed by NAJD from facts it holds, never from model-internal reasoning.
@@ -598,6 +606,69 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
     // Observations that failed in this task (by tool and arguments) and how many changes happened since (repeated-failure protection).
     const failedCalls = new Map()
     let changeCount = 0, lastCallKey = '', sameStreak = 0
+    // Validation failures (calls that never ran) are counted apart from executed failures: consecutive ones and, within that
+    // streak, identical ones. Only a tool call that runs and succeeds ends a streak; loading tools or discovery does not.
+    let invalidStreak = 0
+    const invalidSeen = new Map()
+    // Effects whose outcome is unknown, by call identity, with the operation and target they affected. The identical call is
+    // refused while the state is 'unknown' (UNKNOWN_EFFECT_NOT_REPEATED) or 'confirmed' (EFFECT_ALREADY_DONE). Only a read of the
+    // same file can establish a file effect; a command, a desktop action, a page interaction or a process start has no
+    // observation that proves its effect here, so its block stays for the rest of the run.
+    const uncertainCalls = new Map()
+    const effectTarget = (operation, args) => ['files.write', 'files.edit'].includes(operation) ? samePath(args.path) : null
+    function samePath(value) {
+      let text = String(value || '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+      if (!/^[a-z]:\//i.test(text)) text = String(workspace?.workspace || '').replace(/\\/g, '/').replace(/\/+$/, '') + '/' + text
+      return text.toLowerCase()
+    }
+    // A read of the affected file: the whole intended content means the write happened ('confirmed'); a missing file means a
+    // write did not happen ('absent', and the entry is dropped so the next identical call goes through its approval again);
+    // anything else proves nothing ('unknown', still blocked). An edit is confirmed by its replacement without the old text,
+    // absent by the old text without the replacement.
+    function resolveUncertain(readArgs, output, failed) {
+      const target = samePath(readArgs.path)
+      const results = []
+      for (const [key, entry] of uncertainCalls) {
+        if (entry.target !== target || entry.state !== 'unknown') continue
+        const whole = !failed && typeof output?.text === 'string' && !output.offset && output.hasMore === false
+        const missing = failed && output?.error === 'NOT_FOUND'
+        let state = 'unknown'
+        if (entry.operation === 'files.write') state = whole && output.text === entry.args.content ? 'confirmed' : missing ? 'absent' : 'unknown'
+        else if (entry.operation === 'files.edit' && whole && typeof entry.args.find === 'string' && entry.args.find && typeof entry.args.replace === 'string' && entry.args.replace && !entry.args.replace.includes(entry.args.find) && !entry.args.find.includes(entry.args.replace)) {
+          const hasNew = output.text.includes(entry.args.replace), hasOld = output.text.includes(entry.args.find)
+          state = hasNew && !hasOld ? 'confirmed' : hasOld && !hasNew ? 'absent' : 'unknown'
+        }
+        if (state === 'absent') uncertainCalls.delete(key)
+        else entry.state = state
+        results.push(state)
+      }
+      return results
+    }
+    // What succeeded in this run, for the final explanation when NAJD has to stop it.
+    const completedSteps = []
+    // A controlled end after the repair budget: the answer is composed by NAJD from what it recorded, so no further model call is made.
+    async function stopForRepair(problem, reason) {
+      await settleJobs()
+      const arabic = /[\u0600-\u06FF]/.test(String(request?.text || ''))
+      const name = String(problem.error)
+      const done = completedSteps.length ? completedSteps.slice(-8).map(line => '- ' + line).join('\n') : (arabic ? '- لا شيء' : '- nothing')
+      const text = arabic
+        ? `أوقف نجد المهمة: النموذج أرسل طلبات أدوات لا يمكن تنفيذها (${name}${reason === 'identical' ? '، نفس الطلب ثلاث مرات' : '، ست مرات متتالية'}). لم يُنفَّذ أي من هذه الطلبات.
+
+ما تم قبل ذلك:
+${done}
+
+أعد صياغة الطلب أو جرّب نموذجًا آخر.`
+        : `NAJD stopped this task: the model kept sending tool calls it cannot run (${name}${reason === 'identical' ? ', the same call three times' : ', six in a row'}). None of those calls ran.
+
+Done before that:
+${done}
+
+Rephrase the request or try another model.`
+      const receiptNow = receipt('stopped_invalid_calls')
+      onEvent('reasoning.summary', 'najd-plan', clip('Stopped after ' + invalidStreak + ' invalid tool calls in a row (' + name + ')'))
+      return { kind: 'message', text, images: [], ...receiptNow, receipt: receiptNow }
+    }
     // Everything the owner asked in this request: its text and the messages added while it runs (the claim check reads all of it, C24-01).
     const asked = [String(request?.text || '')]
     const addNotes = notes => {
@@ -706,6 +777,7 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
     const seen = new Set()
     let lastDiscovery = '', discoveryRepeats = 0
     let claimChecked = false // the one check of an answer that claims an action no tool performed
+    let emptyAsked = false // the one request for an answer after an empty reply
     const maxCalls = depth ? 1000 : 5000
     for (let turn = 0; turn <= maxCalls; turn++) {
       check()
@@ -735,6 +807,20 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
       // What the model thought before this step, shown to the owner as it arrives (the union advisors' notes are shown by onAdvice below) (owner request 2026-10-24).
       if (!depth) {
         if (typeof result?.thinking === 'string' && result.thinking.trim()) onEvent('reasoning.text', 'najd-thinking', result.thinking)
+      }
+      // A reply with no text and no tool call (a thinking model that only thought) is asked for its answer once; a second empty
+      // reply ends the task with NAJD's own account of what ran, instead of failing a task whose work is done.
+      if (result?.kind === 'message' && result.empty === true) {
+        if (!emptyAsked) {
+          emptyAsked = true
+          input.push({ role: 'user', content: [{ type: 'input_text', text: 'NAJD_EMPTY_ANSWER: your last reply had no text and no tool call. Give the user the final answer now from the results above, or call the next tool if the task is not finished.' }] })
+          continue
+        }
+        await settleJobs()
+        const arabic = /[؀-ۿ]/.test(String(request?.text || ''))
+        const steps = completedSteps.length ? completedSteps.slice(-8).map(line => '- ' + line).join('\n') : (arabic ? '- لا شيء' : '- nothing')
+        const done = receipt('completed_without_answer')
+        return { kind: 'message', text: (arabic ? 'لم يكتب النموذج ردًا. هذا ما نفّذه نجد في هذه المهمة:\n' : 'The model wrote no reply. What NAJD did in this task:\n') + steps, images: [], ...done, receipt: done }
       }
       // Added while the model was writing its answer: the answer is not final yet; it is shown to the model as its draft, which it revises
       // to include what the owner added.
@@ -788,17 +874,23 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
       else if (call.arguments.length > limit) problem = { error: 'ARGUMENTS_TOO_LONG', hint: 'The arguments are ' + call.arguments.length + ' characters; this tool takes at most ' + limit + '. Write long content to a file with najd_files_write first (up to 200000 characters), then use that file.' }
       else { try { args = JSON.parse(call.arguments) } catch { problem = { error: 'INVALID_ARGUMENTS', hint: 'The arguments were not valid JSON. Call the tool again with one JSON object.' } } }
       if (!problem && (!args || typeof args !== 'object' || Array.isArray(args))) problem = { error: 'INVALID_ARGUMENTS', hint: 'The arguments must be one JSON object.' }
-      if (problem) {
-        onEvent('tool.failed', definition ? definition.name.replaceAll('_', '-') : 'najd-tool', 'error: ' + problem.error)
-        input.push(...result.items, { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(problem) })
-        continue
-      }
-      const required = definition.schema.parameters.required
+      const required = definition && args && typeof args === 'object' && !Array.isArray(args) ? definition.schema.parameters.required : null
       // Providers without strict schemas (Kimi, Ollama) may omit or add keys: tell the model and let it retry.
-      const missing = required.filter(key => !Object.hasOwn(args, key)), unexpected = Object.keys(args).filter(key => !required.includes(key))
-      if (missing.length || unexpected.length) {
-        input.push(...result.items, { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ error: 'INVALID_ARGUMENTS', missing, unexpected,
-          note: 'Every listed parameter is required; use "" or 0 when a value does not apply. Call the tool again with exactly these keys.' }) })
+      const missing = !problem && required ? required.filter(key => !Object.hasOwn(args, key)) : [], unexpected = !problem && required ? Object.keys(args).filter(key => !required.includes(key)) : []
+      if (!problem && (missing.length || unexpected.length)) problem = { error: 'INVALID_ARGUMENTS', missing, unexpected,
+        hint: 'Every listed parameter is required; use "" or 0 when a value does not apply. Call the tool again with exactly these keys.' }
+      if (problem) {
+        // Bounded repair: the model gets the exact problem and a correction; the same invalid call a third time, or six
+        // invalid calls in a row, ends the run with NAJD's own account of what was done (no further model call).
+        const signature = call.name + '|' + problem.error + '|' + (args && typeof args === 'object' ? stable(args) : createHash('sha256').update(call.arguments).digest('hex'))
+        const times = (invalidSeen.get(signature) || 0) + 1
+        invalidSeen.set(signature, times); invalidStreak++; invalidTotal++
+        onEvent('tool.failed', definition ? definition.name.replaceAll('_', '-') : 'najd-tool', 'error: ' + problem.error + (times > 1 ? ' · repeated' : ''))
+        if (times >= REPAIR.identical || invalidStreak >= REPAIR.streak) return await stopForRepair(problem, times >= REPAIR.identical ? 'identical' : 'streak')
+        const left = Math.min(REPAIR.identical - times, REPAIR.streak - invalidStreak)
+        input.push(...result.items, { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ ...problem,
+          ...(times > 1 ? { repeated: true, hint: 'This is the same invalid call as before; sending it again does not change the answer. ' + problem.hint } : {}),
+          attemptsLeft: left, note: left === 1 ? 'One more invalid call ends this task. Correct the call, use another tool, or answer the user.' : undefined }) })
         continue
       }
       // Bound consecutive identical discovery calls, never polling or device/file actions.
@@ -891,7 +983,7 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
       const tooFull = definition.operation in roomFor && remainingRoom() < roomFor[definition.operation]
       // The same observation that already failed, with nothing changed since, is answered from that failure instead of
       // spending another call on it; the model is told to change approach (repeated-failure protection).
-      const callKey = definition.name + ':' + JSON.stringify(args)
+      const callKey = definition.name + ':' + stable(args)
       const earlier = OBSERVING.has(definition.operation) ? failedCalls.get(callKey) : null
       const repeated = earlier && earlier.changes === changeCount
       // The same call again and again (owner live test 2026-10-31: a small model pressed one control 26 times) is stopped
@@ -901,7 +993,9 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
       const looping = sameStreak > 4
       try {
         if (tooFull) throw error('CONTEXT_LIMIT')
-        if (looping) output = { error: 'LOOP_DETECTED', hint: 'This exact call ran ' + (sameStreak - 1) + ' times in a row. Stop repeating it: check the latest result, change the approach, or answer the user with what is done and what is not.' }
+        if (uncertainCalls.get(callKey)?.state === 'confirmed') output = { status: 'refused', error: 'EFFECT_ALREADY_DONE', hint: 'A read of the target showed this exact change is already in place. It was not sent again.' }
+        else if (uncertainCalls.has(callKey)) output = { status: 'refused', error: 'UNKNOWN_EFFECT_NOT_REPEATED', hint: 'This exact action already ran once and its effect is unknown. It is not sent again: ' + (uncertainCalls.get(callKey).target ? 'read that file with najd_files_read to establish whether it changed, then decide.' : 'nothing here can prove its effect, so tell the user what may have happened and let them check.') }
+        else if (looping) output = { error: 'LOOP_DETECTED', hint: 'This exact call ran ' + (sameStreak - 1) + ' times in a row. Stop repeating it: check the latest result, change the approach, or answer the user with what is done and what is not.' }
         else if (repeated) output = { error: 'REPEATED_FAILURE', previous: earlier.code, hint: earlier.hint || 'This exact call already failed and nothing changed since. Use different arguments or another approach.' }
         else if (definition.operation === 'terminal.run' && LONG_RUNNING.test(String(args.command || ''))) {
           if (readiness.process === true && !tools.has('najd_process_start')) tools.addToolset('process')
@@ -935,7 +1029,11 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
           }
           case 'library.search': output = await library.search(args.query); break
           // Earlier conversations (owner request 2026-10-19: remember across chats like ChatGPT and Claude).
-          case 'web.preview': output = webPreview ? await webPreview.capture({ target: args.target, width: args.width, fullPage: args.fullPage === true, steps: typeof args.steps === 'string' ? args.steps : '' }, { signal: combined }) : { error: 'SERVICE_UNAVAILABLE' }; break
+          // Clicks and typing on a localhost server wait for the owner's approval (or the access mode) with the exact
+          // address and steps; a local file page is contained and needs none (web-preview.cjs explains both).
+          case 'web.preview': output = webPreview ? await webPreview.capture({ target: args.target, width: args.width, fullPage: args.fullPage === true, steps: typeof args.steps === 'string' ? args.steps : '' }, { signal: combined,
+            authorize: typeof requestApproval === 'function' ? async ({ url, steps }) => await requestApproval('najd-web-preview', { path: url,
+              summary: 'Click and type on the local server page ' + url + ' in a contained preview (it may change that server through its own page). Steps, run once exactly as shown:\n' + steps.map((item, index) => (index + 1) + '. ' + item.kind + (item.target ? ' ' + JSON.stringify(item.target) : '') + (item.kind === 'fill' || item.kind === 'expect' ? ' = ' + JSON.stringify(item.text) : item.kind === 'wait' ? ' ' + item.ms + ' ms' : '')).join('\n') }) === 'ALLOW_ONCE' : null }) : { error: 'SERVICE_UNAVAILABLE' }; break
           case 'knowledge.search': {
             if (!knowledge || typeof args.base !== 'string' || !args.base.trim()) throw error('INVALID_INPUT')
             const base = bases.find(row => row.id === args.base.trim() || row.name === args.base.trim())
@@ -1122,6 +1220,18 @@ function createAgentRuntime({ catalog, library, skills, connectors, workspace, w
         (jobEnded && ['failed', 'expired'].includes(output?.status)) || (!failed && typeof output?.error === 'string')
       if (failed || negative) { if (!repeated && OBSERVING.has(definition.operation)) failedCalls.set(callKey, { changes: changeCount, code: String(output?.error || output?.status || 'TOOL_FAILED'), hint: typeof output?.hint === 'string' ? output.hint : '' }) }
       else if (!OBSERVING.has(definition.operation)) changeCount++
+      // An effect that may have happened is a change: an earlier failed read of its target is read again, never answered from that failure.
+      if (unverified && failed && !OBSERVING.has(definition.operation)) changeCount++
+      if (unverified && !OBSERVING.has(definition.operation)) uncertainCalls.set(callKey, { operation: definition.operation, target: effectTarget(definition.operation, args), args, state: 'unknown' })
+      // Only evidence about the affected target resolves an uncertain effect (independent review of 0.10.17: any observation,
+      // capability metadata included, cleared every block). The read reports what it established.
+      if (definition.operation === 'files.read') {
+        const checks = resolveUncertain(args, output, failed)
+        if (checks.length && output && typeof output === 'object') output = { ...output, effectCheck: checks.length === 1 ? checks[0] : checks.join(',') }
+      }
+      const clean = !failed && !unverified && !declined && !negative
+      // Discovery, guide reading and tool loading are orchestration, not task progress: they never end a repair streak.
+      if (clean && !ORCHESTRATION.has(definition.operation)) { invalidStreak = 0; invalidSeen.clear(); completedSteps.push(clip(tool + ': ' + endDetail(definition.operation, output, false))) }
       onEvent(failed || unverified || declined || negative ? 'tool.failed' : 'tool.completed', tool,
         unverified ? 'effect unknown: ' + endDetail(definition.operation, output, false) : declined ? 'declined: ' + output.status + (typeof output.error === 'string' && /^[A-Z_]{2,40}$/.test(output.error) ? ' · ' + output.error : '') : negative ? 'unsuccessful: ' + (output.errorCode || output.status || output.error) : endDetail(definition.operation, output, failed))
       // A screenshot reaches the model as an image after the tool result, never as base64 text.

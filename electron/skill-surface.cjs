@@ -34,6 +34,14 @@ function createSkillSurface({ bundled, external, packs }) {
     id = id.trim()
     // A saved skill's id starts with "my-"; the same name without it means that skill (owner live test 2026-10-31).
     if (!id.startsWith('my-') && !(await bundled.list()).some(row => row.id === id) && await external.has('my-' + id)) id = 'my-' + id
+    // A skill named by its display name ("Numbered text file") means the skill with that name or with that name as an id
+    // (Kimi acceptance 2026-10-31: the saved skill was first read by its name and refused).
+    const all = [...await bundled.list(), ...await external.list()]
+    if (!all.some(row => row.id === id)) {
+      const slug = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+      const named = all.find(row => typeof row.name === 'string' && row.name.trim().toLowerCase() === id.toLowerCase()) || all.find(row => slug && (row.id === slug || row.id === 'my-' + slug))
+      if (named) id = named.id
+    }
     const owner = await ownerOf(id)
     const rows = owner === 'external' ? await external.list() : await bundled.list()
     const row = rows.find(item => item.id === id)

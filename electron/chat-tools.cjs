@@ -68,7 +68,10 @@ function agentResult(message, usage) {
     return { kind: 'agent-tools', calls: [{ name, arguments: args, call_id: id }], items: [{ type: 'function_call', name, arguments: args, call_id: id }], usage, ...thought }
   }
   const text = content.trim()
-  if (!text || text.length > 4000000) throw fail('INVALID_MODEL_OUTPUT')
+  if (text.length > 4000000) throw fail('INVALID_MODEL_OUTPUT')
+  // A reply with no text and no tool call (a thinking model that only thought: qwen3.5:4b ended a finished file task this way
+  // in 2 of 3 runs, 2026-10-31) is passed on as empty; the agent loop asks once for the answer instead of failing the task.
+  if (!text) return { kind: 'message', text: '', empty: true, usage, ...thought }
   return { kind: 'message', text, usage, ...thought }
 }
 module.exports = { chatTools, chatMessages, agentResult, splitThinking, clipThinking }

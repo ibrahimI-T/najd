@@ -97,6 +97,9 @@ test('a procedure saved through the approval flow is listed, read back and reuse
   assert.equal(readAsMain.text, read.text)
   // The saved name without its "my-" prefix finds the same skill.
   assert.ok(id.startsWith('my-'))
-  const [withoutPrefix] = await drive(skills, [['najd_skills_read', { id: id.slice(3), file: '', offset: 0, limit: 0 }]])
+  const [withoutPrefix, byName, byNameCase] = await drive(skills, [['najd_skills_read', { id: id.slice(3), file: '', offset: 0, limit: 0 }],
+    ['najd_skills_read', { id: 'Numbered test file', file: '', offset: 0, limit: 0 }], ['najd_skills_read', { id: 'numbered TEST file', file: 'SKILL.md', offset: 0, limit: 0 }]])
   assert.equal(withoutPrefix.text, read.text)
+  // Its display name finds it too (Kimi acceptance 2026-10-31).
+  assert.equal(byName.text, read.text); assert.equal(byNameCase.text, read.text)
 })

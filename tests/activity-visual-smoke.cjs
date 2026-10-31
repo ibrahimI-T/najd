@@ -47,7 +47,9 @@ async function main() {
       summary: document.querySelector('.pending-activity .act-summary')?.textContent || '', stop: !!document.querySelector('.pending-activity .act-stop') }))()`)
     // The agent's work is shown in English in both languages (owner request 2026-10-31).
     assert.match(live.caption, /Waiting for your approval/)
-    assert.ok(live.rows.some(row => row.includes('kind-reasoning')), 'reasoning summary row: ' + JSON.stringify(live.rows))
+    // NAJD's own plan line is kept in the record but not shown as a row since 6e5e01c (thinking is shown like Claude); the
+    // model's thinking and the tool steps are the rows.
+    assert.ok(!live.rows.some(row => row.includes('kind-reasoning')), 'the plan line is not a row: ' + JSON.stringify(live.rows))
     assert.ok(live.rows.some(row => row.includes('kind-approval') && row.includes('st-awaiting-approval')), 'approval in place')
     assert.ok(live.stop, 'stop button while running')
     assert.equal(live.summary, '', 'the header carries no counters line (flat reference design)')
@@ -63,7 +65,8 @@ async function main() {
     await click(client, '.message-turn.assistant .act-toggle')
     assert.equal(await evaluate(client, 'document.querySelector(".message-turn.assistant .act-toggle").getAttribute("aria-expanded")'), 'true')
     const kinds = await evaluate(client, '[...document.querySelectorAll(".message-turn.assistant .act-row")].map(r => r.className.match(/kind-[\\w-]+/)[0])')
-    for (const kind of ['kind-reasoning', 'kind-search', 'kind-file-read', 'kind-file-write', 'kind-approval', 'kind-success']) assert.ok(kinds.includes(kind) || kinds.some(k => k === kind), kind + ' in ' + kinds.join())
+    assert.ok(!kinds.includes('kind-reasoning'), 'plan line hidden in the completed record too')
+    for (const kind of ['kind-search', 'kind-file-read', 'kind-file-write', 'kind-approval', 'kind-success']) assert.ok(kinds.includes(kind) || kinds.some(k => k === kind), kind + ' in ' + kinds.join())
     await click(client, '.message-turn.assistant .act-row.kind-file-write .act-line')
     assert.equal(await evaluate(client, '!!document.querySelector(".message-turn.assistant .act-row.kind-file-write .act-detail")'), true)
     await shot('03-completed-expanded-ar')

@@ -123,7 +123,11 @@ function createWorkspaceTools({ getRoots, workspace, getProtectedRoots = () => [
   async function list(args) {
     // An empty path lists the NAJD workspace, as "." does (a model's first call often leaves it empty: one wasted step otherwise).
     const { absolute } = resolve(typeof args.path === 'string' && !args.path.trim() ? '.' : args.path)
-    const entries = await fsp.readdir(absolute, { withFileTypes: true }).catch(() => { throw error('READ_FAILED') })
+    // The NAJD workspace folder is created by its first write; before that it is listed as empty, not as a failure.
+    const entries = await fsp.readdir(absolute, { withFileTypes: true }).catch(failure => {
+      if (failure?.code === 'ENOENT' && path.resolve(absolute).toLowerCase() === path.resolve(nearestReal(workspace)).toLowerCase()) return []
+      throw error('READ_FAILED')
+    })
     record({ action: 'list-folder', decision: 'allowed', path: absolute })
     return { path: absolute, truncated: entries.length > 200,
       entries: entries.slice(0, 200).map(entry => ({ name: entry.name, type: entry.isDirectory() ? 'folder' : 'file' })) }

@@ -34,9 +34,13 @@ app.whenReady().then(async () => {
     if (req.url === '/hero') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<title>hero</title><style>body{margin:0}.hero{height:100vh;background:#123}.foot{height:300px;background:#c9a24a}</style><div class=hero></div><div class=foot></div><script>addEventListener("load",()=>{document.title="hero:"+document.querySelector(".hero").offsetHeight})</script>') }
     if (req.url === '/poster') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(`<title>poster</title><img src="http://127.0.0.1:${otherPort}/pixel"><script>fetch('/delete-everything', { method: 'POST', body: 'x' }).catch(() => {}); fetch('http://127.0.0.1:${otherPort}/admin', { method: 'DELETE' }).catch(() => {}); fetch('http://127.0.0.1:${otherPort}/read').catch(() => {}); try { new WebSocket('ws://127.0.0.1:${port}/hmr') } catch {}</script>`) }
     if (req.url === '/rtc') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(`<title>rtc</title><script>try { const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:${stunPort}' }, { urls: 'turn:127.0.0.1:${turnPort}?transport=tcp', username: 'u', credential: 'p' }] }); pc.createDataChannel('x'); pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(() => {}) } catch {}</script>`) }
+    // A local page whose button sends GET requests to its server: clicking it can change the server (owner review 2026-10-31).
+    if (req.url === '/clicker') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<title>clicker</title><button id="hit" onclick="fetch(\'/hit\')">Hit</button>') }
+    if (req.url === '/hit') { serverHits++; res.writeHead(204); return res.end() }
     if (req.url === '/hang') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<title>hang</title><script>setTimeout(()=>{for(;;){}},50)</script>') }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(html.replace('class="wide"', 'class="ok"'))
   })
+  let serverHits = 0
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = server.address().port
   // R7-001: another local service that a previewed page must not reach, and writes the page must not make.
@@ -114,6 +118,15 @@ app.whenReady().then(async () => {
       { fill: '#step', text: '5' }, { click: '#inc' }, { read: '#count' }, { click: 'Reset' }, { expect: '#count', text: '0' }, { expect: '#count', text: '9' }, { click: 'Missing' }, { click: 'Off' }]) })
     assert.deepEqual(counter.steps.map(item => [item.ok, item.value ?? item.error ?? null]), [[true, null], [true, null], [true, '2'], [true, '5'], [true, null], [true, '7'], [true, null], [true, '0'], [false, '0'], [false, 'ELEMENT_NOT_FOUND'], [false, 'ELEMENT_DISABLED']])
     assert.equal(counter.stepsPassed, false); assert.match(counter.text, /Count: 0/)
+    // Clicks on a localhost server need the owner's approval of that address and those steps; denied or missing, nothing is sent.
+    const clicks = JSON.stringify([{ click: '#hit' }, { click: '#hit' }, { click: '#hit' }, { wait: 300 }])
+    await assert.rejects(preview.capture({ target: `http://127.0.0.1:${port}/clicker`, steps: clicks }), { code: 'PERMISSION_DENIED' })
+    assert.equal((await preview.capture({ target: `http://127.0.0.1:${port}/clicker`, steps: clicks }, { authorize: async () => false })).status, 'denied_by_user')
+    assert.equal(serverHits, 0)
+    const asked = []
+    const approved = await preview.capture({ target: `http://127.0.0.1:${port}/clicker`, steps: clicks }, { authorize: async details => { asked.push(details); return true } })
+    assert.equal(approved.stepsPassed, true); assert.equal(serverHits, 3, 'each approved click reached the server once')
+    assert.equal(asked.length, 1); assert.equal(asked[0].origin, `http://127.0.0.1:${port}`); assert.equal(asked[0].steps.length, 4)
     await assert.rejects(preview.capture({ target: 'https://example.com/', steps: '[{"click":"a"}]' }), { code: 'URL_NOT_ALLOWED' })
     await assert.rejects(preview.capture({ target: root, steps: 'not json' }), { code: 'INVALID_INPUT' })
     if (out) for (const [name, shot] of [['desktop', desktop], ['phone', phone]]) fs.writeFileSync(path.join(out, `preview-${name}.jpg`), Buffer.from(shot.imageUrl.split(',')[1], 'base64'))

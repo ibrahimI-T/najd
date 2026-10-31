@@ -105,7 +105,10 @@ test('the model thinking is read from reasoning_content, reasoning or a leading 
   assert.equal(call.kind, 'agent-tools'); assert.equal(call.thinking, 'I need the file.')
   assert.equal('thinking' in agentResult({ content: 'plain' }, null), false)
   assert.ok(agentResult({ content: 'x', reasoning_content: 'y'.repeat(20000) }, null).thinking.length <= 12001)
-  assert.throws(() => agentResult({ content: '<think>only thinking</think>' }, null), { code: 'INVALID_MODEL_OUTPUT' })
+  // Only thinking, no text and no call: passed on as an empty reply (the agent loop asks once for the answer), never as text.
+  const empty = agentResult({ content: '<think>only thinking</think>' }, null)
+  assert.equal(empty.kind, 'message'); assert.equal(empty.empty, true); assert.equal(empty.text, ''); assert.equal(empty.thinking, 'only thinking')
+  assert.throws(() => agentResult({ tool_calls: [{ function: { name: 'bad name', arguments: '{}' } }] }, null), { code: 'INVALID_MODEL_OUTPUT' })
 })
 test('the runtime shows each step thinking and the union advice, only for the main task', async () => {
   const runtime = createAgentRuntime({ catalog: { search: async () => [], details: async () => ({}), summary: async () => '' }, library: { list: async () => [] } })

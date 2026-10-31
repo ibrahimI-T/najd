@@ -539,11 +539,16 @@ export function App() {
     }
   }
 
+  // Enter pressed while NAJD is still opening (history, recovery or the model connection loading) used to do nothing at all,
+  // which looked like a lost message (owner report after an update). The message now waits and is sent once NAJD is ready.
+  const [queuedSend, setQueuedSend] = useState(false)
   async function submitDraft(event: React.FormEvent) {
     event.preventDefault()
     if (busy && activeTaskId) { await addToRunningTask(draft.trim()); return }
+    if (draft.trim() && !busy && !approval && (!historyReady || !recoveryReady || providers.connectionBusy || importing)) { setQueuedSend(true); return }
     await submitText(draft.trim(), {})
   }
+
   // A message sent while a task works joins it (the agent reads it at its next step) and shows in the conversation at once. What the task
   // never read becomes the next request when it ends (followUp below), so nothing is lost.
   async function addToRunningTask(text: string) {
@@ -618,6 +623,13 @@ export function App() {
   const recoveredAsks = useRef<Set<string>>(new Set())
   // Until the running browser questions have been found and attached (one at a time), nothing else starts: recovery is the only owner of the busy state.
   const [recoveryReady, setRecoveryReady] = useState(() => !window.najdBrowser?.activeAsks)
+  const notReady = !historyReady || !recoveryReady || providers.connectionBusy || importing
+  // The waiting message goes out once NAJD is ready (see submitDraft).
+  useEffect(() => {
+    if (!queuedSend || notReady || busy || approval) return
+    setQueuedSend(false)
+    if (draft.trim()) void submitText(draft.trim(), {})
+  }, [queuedSend, notReady, busy, approval])
   async function recoverAsk(taskId: string) {
     if (recoveredAsks.current.has(taskId) || !window.najdCore?.getTask) return
     recoveredAsks.current.add(taskId)
@@ -1093,6 +1105,7 @@ export function App() {
                 }
                 if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
               }} />
+            {queuedSend && <div className="composer-queued" role="status">{t.sendWhenReady}</div>}
             <div className="composer-footer"><div className="composer-actions"><AttachmentPicker key={activeSessionId} language={preferences.language} selected={attachments} onChange={setAttachments} onBusyChange={setImporting} onManageTools={() => openSettingsAt('skills')} disabled={busy || !!approval || providers.connectionBusy} /><AccessModeMenu mode={accessMode} t={t} disabled={busy || importing || !!approval || providers.connectionBusy} onSelect={setAccessMode} /></div>
               <div className="composer-spacer" />
               <ComposerModels c={providers} t={t} disabled={busy || !!approval || providers.connectionBusy}
@@ -1100,7 +1113,7 @@ export function App() {
               {/* While a task works, Stop stays; typing shows Send too, and what is sent joins the task. */}
               {busy && activeTaskId && <button className="send-button stop" type="button" onClick={() => { void stopTask() }} aria-label={t.stopTask}><Square size={13} fill="currentColor" /></button>}
               {(!(busy && activeTaskId) || draft.trim()) && <button className="send-button" type="submit" data-adds-to-task={busy && activeTaskId ? 'true' : undefined} title={busy && activeTaskId ? t.addToTask : undefined}
-                disabled={!draft.trim() || importing || providers.connectionBusy || !!approval || !historyReady || (busy && !activeTaskId)} aria-label={busy && activeTaskId ? t.addToTask : t.send}><ArrowUp size={17} /></button>}
+                disabled={!draft.trim() || !!approval || (busy && !activeTaskId)} aria-label={busy && activeTaskId ? t.addToTask : t.send}><ArrowUp size={17} /></button>}
             </div>
           </form>
         </div>

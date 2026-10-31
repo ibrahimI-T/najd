@@ -42,7 +42,8 @@ function validReadPath(value) {
 // Tools that can change the world once dispatched; a run stopped while one is open may have changed it already.
 const EFFECTFUL = new Set(['najd-files-write', 'najd-files-edit', 'najd-files-move', 'najd-files-delete', 'najd-terminal-run', 'najd-python-run', 'najd-process-start',
   'najd-process-stop', 'najd-desktop-open', 'najd-desktop-act', 'najd-mcp-call', 'najd-mcp-install', 'najd-extension-install', 'najd-image-generate', 'najd-video-generate', 'najd-video-transcribe', 'najd-video-cancel'])
-const effectful = (tool, detail) => EFFECTFUL.has(tool) || tool === 'najd-browser' && /^(click|type|select|login)\b/.test(String(detail || ''))
+const effectful = (tool, detail) => EFFECTFUL.has(tool) || tool === 'najd-browser' && /^(click|type|select|login)\b/.test(String(detail || '')) ||
+  tool === 'najd-web-preview' && /^interact\b/.test(String(detail || '')) // clicks on a localhost server page
 
 function createNajdCore({ model, tool, authorizeTool, journal, verifyTool, onReceipt, onChange } = {}) {
   const tasks = new Map()

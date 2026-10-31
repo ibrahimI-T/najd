@@ -261,7 +261,13 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
   // The page address and its mode. A folder means its index.html, which is authorized again as the final file.
   async function address(target) {
     if (typeof target !== 'string' || !target.trim() || target.length > 2000) throw fail('INVALID_INPUT')
-    const value = target.trim()
+    let value = target.trim()
+    // A file:/// address of a local drive means that file (qwen3.5:4b acceptance 2026-10-31); it is then checked like any path,
+    // and a refused one keeps the address refusal (URL_NOT_ALLOWED) it always had.
+    if (/^file:\/\/\/[a-z]:\//i.test(value)) {
+      try { value = fileURLToPath(value) } catch { throw fail('URL_NOT_ALLOWED') }
+      try { return await address(value) } catch (failure) { throw failure?.code === 'NOT_FOUND' ? failure : fail('URL_NOT_ALLOWED') }
+    }
     if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?(\/\S*)?$/i.test(value)) return { url: value, mode: 'local' }
     if (/^https:\/\//i.test(value)) {
       const url = publicHttps(value)
@@ -284,9 +290,14 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
     return { url: pathToFileURL(file).href, mode: 'file' }
   }
 
-  async function capture({ target, width = 1440, height = 900, fullPage = false, steps: rawSteps } = {}, { signal } = {}) {
+  // Interaction authority (owner review 2026-10-31): a page from a local file runs in a contained session that can only
+  // read the file roots, so its clicks change nothing outside the page and need no approval. A localhost server is not
+  // owned by the task just because it is local: a click can make the page send GET requests that change that server, so
+  // clicks and typing there wait for authorize() with the exact address and the frozen steps, and run only on that origin.
+  async function capture({ target, width = 1440, height = 900, fullPage = false, steps: rawSteps } = {}, { signal, authorize = null } = {}) {
     if (signal?.aborted) throw fail('CANCELLED')
-    const steps = parseSteps(rawSteps)
+    const steps = Object.freeze(parseSteps(rawSteps).map(item => Object.freeze({ ...item })))
+    const interacts = steps.some(item => item.kind === 'click' || item.kind === 'fill')
     let timer, abort
     const stopped = new Promise((_, reject) => {
       timer = setTimeout(() => reject(fail('TIMEOUT')), timeoutMs)
@@ -300,6 +311,14 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
     try {
       const { url, mode } = await step(address(target))
       if (steps.length && mode === 'public') throw Object.assign(fail('URL_NOT_ALLOWED'), { hint: 'Interaction steps run only on a local HTML file or a localhost dev server, not on a public site.' })
+      const approvedOrigin = mode === 'local' ? new URL(url).origin : null
+      if (interacts && mode === 'local') {
+        if (typeof authorize !== 'function') throw fail('PERMISSION_DENIED')
+        // The approval covers this origin and these steps only; they are frozen before it is asked and never re-read.
+        const decision = await step(Promise.resolve(authorize({ url, origin: approvedOrigin, steps })))
+        if (decision !== true) return { status: 'denied_by_user', url, note: 'Nothing was loaded, clicked or typed.' }
+        if (signal?.aborted) throw fail('CANCELLED')
+      }
       const w = Number.isInteger(width) ? Math.min(1920, Math.max(320, width)) : 1440
       const h = Number.isInteger(height) ? Math.min(2000, Math.max(320, height)) : 900
       const opened = new URL(url)
@@ -331,12 +350,23 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
       // Interaction steps, in order; the page settles briefly after each action. Errors thrown by the page's own handlers
       // show up in consoleErrors.
       const results = []
-      for (const [index, item] of steps.entries()) {
-        if (item.kind === 'wait') { await step(new Promise(resolve => setTimeout(resolve, item.ms))); results.push({ step: index + 1, kind: 'wait', ok: true }); continue }
-        const outcome = await step(win.webContents.executeJavaScript('(' + PAGE_STEP + ')(' + JSON.stringify(item) + ')', true).catch(() => ({ ok: false, error: 'STEP_FAILED' })))
-        results.push({ step: index + 1, kind: item.kind, target: item.target, ...outcome })
-        if (['click', 'fill'].includes(item.kind)) await step(new Promise(resolve => setTimeout(resolve, 150)))
-      }
+      // On a server, every step first checks the page is still on the approved origin: a redirect or a link that moved it
+      // elsewhere stops the steps before anything is clicked there. Once a click or typing was sent, a stop or deadline
+      // leaves its effect on the server unknown, and the failure says so (it is never replayed automatically).
+      let sent = false
+      const onOrigin = () => { try { return new URL(win.webContents.getURL()).origin === approvedOrigin } catch { return false } }
+      try {
+        for (const [index, item] of steps.entries()) {
+          if (signal?.aborted) throw fail('CANCELLED')
+          if (item.kind === 'wait') { await step(new Promise(resolve => setTimeout(resolve, item.ms))); results.push({ step: index + 1, kind: 'wait', ok: true }); continue }
+          if (approvedOrigin && !onOrigin()) { results.push({ step: index + 1, kind: item.kind, target: item.target, ok: false, error: 'TARGET_CHANGED' }); break }
+          if (approvedOrigin && (item.kind === 'click' || item.kind === 'fill')) sent = true
+          const outcome = await step(win.webContents.executeJavaScript('(' + PAGE_STEP + ')(' + JSON.stringify(item) + ')', true).catch(() => ({ ok: false, error: 'STEP_FAILED' })))
+          results.push({ step: index + 1, kind: item.kind, target: item.target, ...outcome })
+          if (['click', 'fill'].includes(item.kind)) await step(new Promise(resolve => setTimeout(resolve, 150)))
+        }
+      // Everything after the steps (page text, picture, image processing) stays inside this block: a failure there after a
+      // click was sent leaves the same uncertainty as one during the steps (independent review of 0.10.17).
       const page = await step(win.webContents.executeJavaScript('({ title: document.title, text: document.body ? document.body.innerText.slice(0, 2000) : "", height: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0), overflowX: document.documentElement.scrollWidth > innerWidth + 1 })', true))
       const pageHeight = Number(page?.height) || h
       let image
@@ -351,6 +381,10 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
         text: String(page?.text || '').slice(0, 2000), horizontalOverflow: !!page?.overflowX, consoleErrors: errors, imageUrl, ...(fullPage && pageHeight > MAX_HEIGHT ? { truncated: true, note2: `The page is ${pageHeight}px tall; the picture shows the first ${MAX_HEIGHT}px.` } : {}),
         ...(steps.length ? { steps: results, stepsPassed: results.every(item => item.ok) } : {}),
         note: 'Look at the picture: check layout, spacing, contrast, text and images, and fix what is off before calling it done. Check a phone width (390) too.' }
+      } catch (failure) {
+        if (sent && failure && typeof failure === 'object') Object.assign(failure, { effectUnknown: true, stepsRun: results.length })
+        throw failure
+      }
     } finally {
       clearTimeout(timer); if (abort) signal?.removeEventListener('abort', abort)
       if (preview) {

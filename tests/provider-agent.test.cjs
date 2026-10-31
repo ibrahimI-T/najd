@@ -78,7 +78,9 @@ test('schema sanitising and malformed model output', () => {
 test('malformed provider answers fail closed with stable codes', async () => {
   const { client: bad } = client('anthropic-api', () => ({ stop_reason: 'weird', content: [] }))
   await assert.rejects(bad.chat({ apiKey: 'sk-ant-fixture-key', modelName: 'claude-opus-5', history, agentTurn: { tools, input: [] } }), { code: 'INVALID_MODEL_OUTPUT' })
+  // An empty reply is passed on marked empty (the agent loop asks once for the answer, then reports what ran); it is never an answer.
   const { client: noTool } = client('groq-api', () => ({ choices: [{ finish_reason: 'stop', message: { content: '' } }] }))
-  await assert.rejects(noTool.chat({ apiKey: 'gsk_fixturefixturefixture', modelName: 'x', history, agentTurn: { tools, input: [] } }), { code: 'INVALID_MODEL_OUTPUT' })
+  const empty = await noTool.chat({ apiKey: 'gsk_fixturefixturefixture', modelName: 'x', history, agentTurn: { tools, input: [] } })
+  assert.equal(empty.kind, 'message'); assert.equal(empty.empty, true); assert.equal(empty.text, '')
   await assert.rejects(noTool.chat({ apiKey: 'gsk_fixturefixturefixture', modelName: 'x', history, agentTurn: { tools: 'no', input: [] } }), { code: 'INVALID_INPUT' })
 })
