@@ -39,7 +39,7 @@ function createKimiCodeClient({ fetchImpl = fetch, timeoutMs = 3600000 } = {}) {
         method: 'POST', redirect: 'error', signal: combined,
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName, stream: false, ...(maxTokens ? { max_tokens: maxTokens } : {}),
-          messages: agentTurn ? chatMessages({ systemPrompt, history, input: agentTurn.input, dialect: 'openai' })
+          messages: agentTurn ? chatMessages({ systemPrompt, history, input: agentTurn.input, dialect: 'openai', vision: true })
             : [...(systemPrompt === undefined ? [] : [{ role: 'system', content: systemPrompt }]), ...history.map(({ role, text }) => ({ role, content: text }))],
           ...(agentTurn ? { tools: chatTools(agentTurn.tools), tool_choice: 'auto', parallel_tool_calls: false } : {}), ...(effort ? { reasoning_effort: effort } : {}) })
       })

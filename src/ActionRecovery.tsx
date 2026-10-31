@@ -23,12 +23,13 @@ export function ActionRecovery({ language }: { language: 'ar' | 'en' }) {
   }
   if (!status || status.available && !status.actions.length) return null
   if (!status.available) return <aside className="action-recovery" role="status">{ar ? 'تعذّر قراءة سجل التنفيذ. يلزم إصلاح السجل قبل تنفيذ إجراءات الجهاز المسجّلة.' : 'Execution history could not be read. Repair it before running recorded device actions.'}</aside>
-  const label = (item: Item) => item.target === 'chrome' ? 'Google Chrome' : item.target === 'edge' ? 'Microsoft Edge' : item.target
-  return <details className="action-recovery" open>
+  const label = (item: Item) => item.target === 'chrome' ? 'Google Chrome' : item.target === 'edge' ? 'Microsoft Edge' : item.target.length > 140 ? item.target.slice(0, 140) + '…' : item.target
+  // One line until the owner opens it, so a new chat stays clean (owner request 2026-10-31); the full target is in the tooltip.
+  return <details className="action-recovery">
     <summary>{ar ? 'إجراءات من التشغيل السابق تحتاج مراجعتك' : 'Actions from the previous run need your review'} ({status.actions.length})</summary>
     <p>{ar ? 'لم يُعد نجد تنفيذ أي إجراء تلقائيًا. الإجراء غير المؤكد قد يكون نُفّذ فعلًا؛ تحقق من نتيجته بنفسك ثم سجّل ما حدث. لا تُستخدم الموافقات السابقة بعد إعادة التشغيل.' : 'NAJD did not repeat any action. An unconfirmed action may have happened; check the result yourself, then record what happened. Earlier approvals are not reused after a restart.'}</p>
     <ul>{status.actions.map(item => <li key={item.id} data-recovery-state={item.state}>
-      <strong dir="auto">{label(item)}</strong>
+      <strong dir="auto" title={item.target}>{label(item)}</strong>
       <span>{item.state === 'UNKNOWN_EFFECT' ? (ar ? 'النتيجة غير مؤكدة' : 'Outcome unconfirmed') : (ar ? 'توقّف قبل التنفيذ؛ يحتاج موافقة جديدة' : 'Stopped before execution; fresh approval required')}</span>
       <time dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleString(ar ? 'ar-SA' : 'en-GB')}</time>
       {window.najdCore?.reconcileAction && <span className="recovery-actions">

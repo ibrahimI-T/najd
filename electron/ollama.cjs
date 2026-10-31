@@ -82,6 +82,9 @@ function createOllamaClient({ baseUrl = 'http://127.0.0.1:11434', timeoutMs = 36
           options: { ...(outputTokenLimit(maxOutputTokens) ? { num_predict: outputTokenLimit(maxOutputTokens) } : {}), num_ctx: 16384 },
           tools: chatTools(agentTurn.tools),
           messages: chatMessages({ systemPrompt, history, input: agentTurn.input, dialect: 'ollama', vision: caps.includes('vision') }) }) }, signal)
+      // An answer cut at the output limit is kept, marked as cut, instead of failing the task; a cut tool call never runs.
+      const cut = result?.done === true && result.done_reason === 'length' && !result.message?.tool_calls?.length && typeof result.message?.content === 'string' && result.message.content.trim()
+      if (cut) return agentResult({ ...result.message, content: result.message.content.trimEnd() + '\n\n[…]' }, fromOllama(result))
       if (result?.done !== true || result.done_reason && result.done_reason !== 'stop') throw providerError('INVALID_MODEL_OUTPUT')
       return agentResult(result.message, fromOllama(result))
     }

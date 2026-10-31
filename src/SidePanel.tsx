@@ -107,7 +107,7 @@ export function SidePanel({ t, language, conversationId, provider, model, modelW
   const links = [browserConnected, ...catalogs.connectors.map(item => item.state === 'connected'), ...catalogs.servers.map(server => server.state === 'connected')]
   const connected = links.filter(Boolean).length, connectionCount = links.length
 
-  return <aside id="side-panel" className="side-panel" aria-label={p.title} onKeyDown={event => { if (event.key === 'Escape') onClose() }}>
+  return <aside id="side-panel" className="side-panel" dir={language === 'ar' ? 'rtl' : 'ltr'} lang={language} aria-label={p.title} onKeyDown={event => { if (event.key === 'Escape') onClose() }}>
     <header className="side-panel-head">
       <strong>{p.title}</strong>
       <button type="button" className="icon-button" onClick={onClose} aria-label={p.hide} title={p.hide}><PanelRightClose size={17} /></button>
@@ -189,6 +189,7 @@ export function SidePanel({ t, language, conversationId, provider, model, modelW
       {!conversationId ? <p className="side-panel-empty">{p.empty}</p> : <>
       <Card id="profile" title={p.profile} summary={activeProfile ? profileTitle(activeProfile) : p.autoShort}>
         <p className="side-panel-note">{activeProfile ? (pinned ? p.pinned : p.chosen) + ' ' + profileTitle(activeProfile) : p.auto}</p>
+        {activeProfile === 'computer' && <p className="side-panel-note profile-workflow"><Monitor size={15} aria-hidden="true" />{ar ? 'ملاحظة النافذة ← تنفيذ الإجراء ← التحقق من النتيجة. الصور حسب دعم النموذج.' : 'Observe the window → act → verify the result. Images depend on model support.'}</p>}
         <div className="profile-picker" role="radiogroup" aria-label={p.profile}>
           <button type="button" role="radio" aria-checked={!pinned} className={!pinned ? 'active' : ''} onClick={() => onPin(null)}>{p.autoShort}</button>
           {(data?.profiles || []).map(item => <button key={item.id} type="button" role="radio" aria-checked={pinned === item.id}

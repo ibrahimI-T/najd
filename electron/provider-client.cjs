@@ -52,7 +52,8 @@ function createProviderClient(provider, { fetchImpl = fetch, baseUrl: override }
       // The agent tool loop over Chat Completions, Anthropic Messages or Gemini (provider-agent.cjs).
       if (!Array.isArray(agentTurn.input) || !Array.isArray(agentTurn.tools) || agentTurn.tools.length > 24) throw providerError('INVALID_INPUT')
       let request
-      try { request = buildAgentRequest(config, { modelName, systemPrompt, history, agentTurn, vision: config.vision === true, maxTokens, effort }) }
+      // Pictures the user attaches go to every API model (owner request 2026-10-31); a model that cannot take them is rejected by its provider.
+      try { request = buildAgentRequest(config, { modelName, systemPrompt, history, agentTurn, vision: config.vision !== false, maxTokens, effort }) }
       catch (error) { throw providerError(error?.code === 'TOOLS_NOT_SUPPORTED' ? 'TOOLS_NOT_SUPPORTED' : 'INVALID_INPUT') }
       if (provider === 'openrouter-api') request.body.provider = { allow_fallbacks: false }
       const data = await jsonRequest(fetchImpl, request.endpoint, { method: 'POST', headers: authHeaders, body: JSON.stringify(request.body) }, signal, 3600000, 64 * 1024 * 1024)

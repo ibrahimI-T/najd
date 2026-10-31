@@ -13,6 +13,7 @@ const { createModelUnions, createAdvisorRound, withAdvice, fitHistory, teamNote 
 const TOOL_PROVIDERS = ['chatgpt', 'openai-api', 'ollama', 'kimi-code'] // plus every catalog provider that has an API address (see supportsTools)
 const { readTool } = require('./model-file-tool.cjs')
 const { modelWindow, validWindow } = require('./model-window.cjs')
+const { modelGuidancePrompt } = require('./model-guidance.cjs')
 const { detectLocalWindow } = require('./local-window.cjs')
 const OLLAMA_WINDOW = 16384
 
@@ -314,6 +315,7 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
     return found.sort((a, b) => a.name.localeCompare(b.name))
   }
   return { catalog, models, contextWindow, setEndpoint, detectLocal, visionCapable: visionOf,
+    modelGuidance: (provider, modelName, options) => { const target = acting(provider, modelName); return modelGuidancePrompt(target.provider, target.model, options) },
     unions: { get: () => unions.get(), save: async config => { const saved = await unions.save(config); await refreshUnions(); return saved } }, saveKey, clearKey, chat, testModel, supportsTools, captureRoute, resolveReasoning: previewReasoning, serviceKey,
     // No usage limits exist; these two stay for compatibility and report the fixed unlimited policy. inputBudget is how much history fits the model's own window.
     limits: async () => ({ policy: await policyStore.get(), cloudAttempts, activeRequests }),

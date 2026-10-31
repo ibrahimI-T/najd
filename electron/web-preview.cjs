@@ -64,6 +64,52 @@ function privateAddress(address) {
   return false
 }
 
+// Interaction steps for functional checks (owner live test 2026-10-31: a counter page was rendered but its buttons were
+// never tested). They run inside the isolated preview page through DOM events, only for local files and the local dev
+// server (never a public site), and each step reports what it found.
+const MAX_STEPS = 20
+const stepError = hint => Object.assign(fail('INVALID_INPUT'), { hint })
+function parseSteps(value) {
+  if (value === undefined || value === null || value === '') return []
+  let list = value
+  if (typeof value === 'string') { try { list = JSON.parse(value) } catch { throw stepError('steps must be a JSON array string, for example [{"click":"#add"},{"expect":"#count","text":"1"}].') } }
+  if (!Array.isArray(list) || list.length > MAX_STEPS) throw stepError('steps must be a JSON array of at most ' + MAX_STEPS + ' steps.')
+  return list.map(step => {
+    const text = typeof step?.text === 'string' ? step.text.slice(0, 500) : ''
+    if (typeof step?.click === 'string' && step.click.trim()) return { kind: 'click', target: step.click.slice(0, 200) }
+    if (typeof step?.fill === 'string' && step.fill.trim()) return { kind: 'fill', target: step.fill.slice(0, 200), text }
+    if (typeof step?.read === 'string' && step.read.trim()) return { kind: 'read', target: step.read.slice(0, 200) }
+    if (typeof step?.expect === 'string' && step.expect.trim() && typeof step.text === 'string') return { kind: 'expect', target: step.expect.slice(0, 200), text }
+    if (Number.isFinite(step?.wait)) return { kind: 'wait', ms: Math.min(2000, Math.max(0, Math.floor(step.wait))) }
+    throw stepError('Each step is one of {"click":target}, {"fill":target,"text":...}, {"read":target}, {"expect":target,"text":...} or {"wait":ms}; target is a CSS selector or the visible text of a button or link.')
+  })
+}
+// Runs in the page: finds a target by CSS selector, then by the exact (then partial) visible text or label of a control.
+const PAGE_STEP = `(step) => {
+  const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+  const label = el => (el.getAttribute('aria-label') || el.innerText || el.value || el.title || '').trim().replace(/[\\s]+/g, ' ').toLowerCase()
+  const find = target => {
+    try { const el = document.querySelector(target); if (el) return el } catch {}
+    const want = target.trim().toLowerCase()
+    const all = [...document.querySelectorAll('button,a,[role=button],input,select,textarea,label,summary,[onclick],[tabindex]')].filter(visible)
+    return all.find(el => label(el) === want) || all.find(el => label(el).includes(want)) || null
+  }
+  const shown = el => (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.value : el.innerText || el.textContent || '').trim().slice(0, 300)
+  const el = find(step.target)
+  if (!el) return { ok: false, error: 'ELEMENT_NOT_FOUND' }
+  if (step.kind === 'click') { if (el.disabled) return { ok: false, error: 'ELEMENT_DISABLED' }; el.scrollIntoView({ block: 'center' }); el.focus?.(); el.click(); return { ok: true } }
+  if (step.kind === 'fill') {
+    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return { ok: false, error: 'NOT_A_FIELD' }
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set
+    el.focus?.(); setter ? setter.call(el, step.text) : (el.value = step.text)
+    el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, value: shown(el) }
+  }
+  const value = shown(el)
+  if (step.kind === 'read') return { ok: true, value }
+  return { ok: value === step.text.trim(), value, expected: step.text.trim() }
+}`
+
 function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirectory = null, files = fsp, prepareImage, lookup = require('node:dns').lookup, requestImpl = https.request, timeoutMs = 30000 }) {
   const modes = new Map() // webContents id -> 'local' | 'public' | 'file'
 
@@ -238,8 +284,9 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
     return { url: pathToFileURL(file).href, mode: 'file' }
   }
 
-  async function capture({ target, width = 1440, height = 900, fullPage = false } = {}, { signal } = {}) {
+  async function capture({ target, width = 1440, height = 900, fullPage = false, steps: rawSteps } = {}, { signal } = {}) {
     if (signal?.aborted) throw fail('CANCELLED')
+    const steps = parseSteps(rawSteps)
     let timer, abort
     const stopped = new Promise((_, reject) => {
       timer = setTimeout(() => reject(fail('TIMEOUT')), timeoutMs)
@@ -252,6 +299,7 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
     let preview = null
     try {
       const { url, mode } = await step(address(target))
+      if (steps.length && mode === 'public') throw Object.assign(fail('URL_NOT_ALLOWED'), { hint: 'Interaction steps run only on a local HTML file or a localhost dev server, not on a public site.' })
       const w = Number.isInteger(width) ? Math.min(1920, Math.max(320, width)) : 1440
       const h = Number.isInteger(height) ? Math.min(2000, Math.max(320, height)) : 900
       const opened = new URL(url)
@@ -280,7 +328,16 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
       await step(win.webContents.insertCSS('::-webkit-scrollbar{display:none!important}').catch(() => {}))
       // Fonts, images and entrance animations settle before the picture.
       await step(new Promise(resolve => setTimeout(resolve, 1200)))
-      const page = await step(win.webContents.executeJavaScript('({ title: document.title, height: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0), overflowX: document.documentElement.scrollWidth > innerWidth + 1 })', true))
+      // Interaction steps, in order; the page settles briefly after each action. Errors thrown by the page's own handlers
+      // show up in consoleErrors.
+      const results = []
+      for (const [index, item] of steps.entries()) {
+        if (item.kind === 'wait') { await step(new Promise(resolve => setTimeout(resolve, item.ms))); results.push({ step: index + 1, kind: 'wait', ok: true }); continue }
+        const outcome = await step(win.webContents.executeJavaScript('(' + PAGE_STEP + ')(' + JSON.stringify(item) + ')', true).catch(() => ({ ok: false, error: 'STEP_FAILED' })))
+        results.push({ step: index + 1, kind: item.kind, target: item.target, ...outcome })
+        if (['click', 'fill'].includes(item.kind)) await step(new Promise(resolve => setTimeout(resolve, 150)))
+      }
+      const page = await step(win.webContents.executeJavaScript('({ title: document.title, text: document.body ? document.body.innerText.slice(0, 2000) : "", height: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0), overflowX: document.documentElement.scrollWidth > innerWidth + 1 })', true))
       const pageHeight = Number(page?.height) || h
       let image
       if (fullPage && pageHeight > h) {
@@ -291,7 +348,8 @@ function createWebPreview({ createSession, isPublicUrl, resolveFile, baseDirecto
       const imageUrl = await step(prepareImage(image))
       const captured = fullPage ? Math.min(MAX_HEIGHT, Math.max(h, pageHeight)) : h
       return { status: 'captured', url: win.webContents.getURL() || url, width: w, height: captured, pageHeight, title: String(page?.title || '').slice(0, 200),
-        horizontalOverflow: !!page?.overflowX, consoleErrors: errors, imageUrl, ...(fullPage && pageHeight > MAX_HEIGHT ? { truncated: true, note2: `The page is ${pageHeight}px tall; the picture shows the first ${MAX_HEIGHT}px.` } : {}),
+        text: String(page?.text || '').slice(0, 2000), horizontalOverflow: !!page?.overflowX, consoleErrors: errors, imageUrl, ...(fullPage && pageHeight > MAX_HEIGHT ? { truncated: true, note2: `The page is ${pageHeight}px tall; the picture shows the first ${MAX_HEIGHT}px.` } : {}),
+        ...(steps.length ? { steps: results, stepsPassed: results.every(item => item.ok) } : {}),
         note: 'Look at the picture: check layout, spacing, contrast, text and images, and fix what is off before calling it done. Check a phone width (390) too.' }
     } finally {
       clearTimeout(timer); if (abort) signal?.removeEventListener('abort', abort)

@@ -15,9 +15,14 @@ Work like a product studio: a clear plan, real content, a distinctive design, an
   `npm install`, `npm run dev`, `npm run build`. Read progress with `najd_process_output`; stop servers with
   `najd_process_stop` when you are done.
 - `najd_files_write` / `najd_files_edit` for source files, in the NAJD workspace unless the user names a folder.
-- `najd_web_preview` renders a page and shows you a picture: a dev server (`http://localhost:5173/`), an HTML file or
-  folder, or a public https page, at a width you choose (1440 desktop, 390 phone), optionally the full page height.
-  It also reports console errors and whether the page scrolls sideways.
+- `najd_web_preview` renders a page: a dev server (`http://localhost:5173/`), an HTML file or folder, or a public
+  https page, at a width you choose (1440 desktop, 390 phone), optionally the full page height. It returns the visible
+  text, console errors and whether the page scrolls sideways, plus a picture for models that see images.
+  A static HTML file needs no server: pass its path directly. Never start a server with `najd_terminal_run`.
+- `steps` in `najd_web_preview` tests behavior on a local file or localhost page, as a JSON array string run in order:
+  `[{"click":"#add"},{"click":"#add"},{"expect":"#count","text":"2"},{"click":"Reset"},{"expect":"#count","text":"0"}]`.
+  Targets are CSS selectors or button/link text; `fill` types into a field. Each step reports `ok` and the value found,
+  and `stepsPassed` says whether all passed. Rendering alone proves nothing about buttons or forms.
 - `najd_image_generate` for original images (hero art, illustrations, an Open Graph image); the user approves each one.
 - Web search and page reading for real facts, references and inspiration.
 
@@ -40,11 +45,14 @@ Work like a product studio: a clear plan, real content, a distinctive design, an
      `@import "tailwindcss";` plus your design tokens in `@theme`.
 4. **Build section by section** with semantic HTML, real text, `lang` and `dir` on `<html>`, logical spacing
    (`ms-`/`me-`, `start`/`end`) so RTL and LTR both work, visible keyboard focus, alt text, and
-   `prefers-reduced-motion` respected. Motion only where it means something.
+   `prefers-reduced-motion` respected. Motion only where it means something. Give every interactive control a stable
+   `id` so it can be tested.
 5. **Run it.** `najd_process_start` with `npm run dev -- --port 5173 --strictPort`; wait for "ready" in its output.
 6. **Look at it - every time something visible changes.** `najd_web_preview` at 1440 with `fullPage: true`, then
    at 390. Fix overflow, cramped or uneven spacing, weak contrast, broken RTL, text over busy images, console errors
    and anything that looks generic. Repeat until it looks finished. Never call a site done without having seen it.
+   For anything interactive, run the main user actions as `steps` and fix what fails before handing it over.
+   Stop the dev server you started with `najd_process_stop` when you are done; leave other processes alone.
 7. **Production build.** `npm run build`, then preview `dist/index.html` the same way. Add `<title>`, a meta
    description, Open Graph tags, a favicon and a 1200x630 share image.
 8. **Give the owner a link that still works.** A `localhost` address stops working when the dev server stops, so never hand it over as the result.

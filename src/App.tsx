@@ -3,9 +3,10 @@ import {
   ArrowLeft, ArrowRight, ArrowUp, Brain, Command,
   Blocks, Globe2, KeyRound, LayoutGrid, Library, MessageSquareText, Monitor,
   Moon, Plus, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
-  Square, Sun, Trash2, WandSparkles, Search, Download, PanelRight, Layers, Send
+  Square, Sun, Trash2, WandSparkles, Search, Download, PanelRight, Layers, Send, FolderKanban, FolderPlus
 } from 'lucide-react'
 import { SidePanel } from './SidePanel'
+import { ProjectView } from './ProjectView'
 import { CanvasPanel, CanvasProvider, type CanvasItem } from './ChatBlocks'
 import { getCopy } from './copy'
 import { ProviderSettings } from './ProviderSettings'
@@ -47,6 +48,7 @@ import najdBackground from './assets/najd-background.webp'
 import { InstructionSkillsSettings } from './InstructionSkillsSettings'
 import { visibleInterval } from './useVisibleInterval'
 import { SlashMenu } from './SlashMenu'
+import { activeMentions, filterMentionable, insertMention, mentionQuery, referenceBlock, rememberMentions, type Mention } from './mentions'
 import { PluginInstaller } from './PluginInstaller'
 import { ChannelsSettings } from './ChannelsSettings'
 import { Welcome, welcomeSeen, markWelcomeSeen } from './Welcome'
@@ -137,6 +139,16 @@ export function App() {
   }, [focusUpdates, settingsOpen, section])
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<NajdAsset[]>([])
+  // Projects: the list, the one shown, and the project a new chat will join when its first message is sent.
+  const [projects, setProjects] = useState<NajdProject[]>([])
+  const [shownProject, setShownProject] = useState<string | null>(null)
+  const [chatProject, setChatProject] = useState<string | null>(null)
+  const [newProjectName, setNewProjectName] = useState<string | null>(null)
+  async function refreshProjects() { try { if (window.najdProjects) setProjects(await window.najdProjects.list()) } catch {} }
+  useEffect(() => { void refreshProjects() }, [])
+  const projectOfChat = (id: string | null) => id ? projects.find(project => project.chats.includes(id)) || null : null
+  // Earlier chats the owner mentioned with @ in the message being written.
+  const [mentions, setMentions] = useState<Mention[]>([])
   const [importing, setImporting] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [messages, setMessages] = useState<NajdMessage[]>([])
@@ -194,6 +206,9 @@ export function App() {
   const [activityEntries, setActivityEntries] = useState<NajdActivityEntry[]>([])
   const [permissionsError, setPermissionsError] = useState(false)
   const t = getCopy(preferences.language)
+  // The agent's own work (activity, tool steps, thinking, approval details and the session panel) is shown in English in
+  // both languages; Arabic is for the app shell and settings (owner request 2026-10-31). Replies follow the user's language.
+  const tEn = getCopy('en')
   const isArabic = preferences.language === 'ar'
   const BackIcon = isArabic ? ArrowRight : ArrowLeft
   const noticeText: Record<Notice, string> = {
@@ -202,7 +217,7 @@ export function App() {
     processesRunning: isArabic ? 'لم تُحذف المحادثة لأن فيها أوامر تعمل في الخلفية ولم يتأكد نجد من إيقافها. حاول مرة أخرى بعد لحظات.' : 'The chat was not deleted: it has background commands that could not be confirmed stopped. Try again in a moment.',
     recovery: isArabic ? 'تعذّر متابعة الإجراء من سجله. راجع الإجراءات السابقة قبل طلبه مرة أخرى.' : 'The recorded action could not continue. Review previous actions before requesting it again.',
     modelTools: t.modelToolsUnavailable,
-    attachmentProvider: isArabic ? 'المرفقات تشتغل مع ChatGPT وOpenAI API وKimi ونماذج Ollama التي تدعم الأدوات (الصور تحتاج نموذجًا يدعم الرؤية). اختر أحدها من قائمة النماذج ثم أرسل.' : 'Attachments work with ChatGPT, OpenAI API, Kimi and Ollama models that support tools (pictures need a vision model). Choose one in the model menu, then send.',
+    attachmentProvider: isArabic ? 'النموذج المختار رفض المرفق. غالبًا لا يستطيع رؤية الصور: جرّب نموذجًا يدعم الصور، أو أرسل الملف بدون صورة.' : 'The selected model refused the attachment. It probably cannot see pictures: try a model that accepts images, or send the file without a picture.',
     attachmentImport: isArabic ? 'تعذّر إضافة الملف. الصيغ المدعومة: نصوص وPDF وWord وصور (PNG/JPEG/WebP/GIF/BMP) وفيديو (MP4/WebM/MOV)، بحد 25 ميجا للمستندات والصور.' : 'The file could not be added. Supported: text, PDF, Word, images (PNG/JPEG/WebP/GIF/BMP) and video (MP4/WebM/MOV); documents and images up to 25 MB.',
     providerLimit: t.providerLimitNotice, providerPolicy: t.providerPolicyNotice,
     model: t.modelMissing, offline: t.localModelOfflineHelp, missingModel: t.localModelMissing,
@@ -251,6 +266,7 @@ export function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null)
   // The "/" menu: typing "/" at the start of the message lists local commands (chat, pages, access, task type, effort, skills).
   const [slashIndex, setSlashIndex] = useState(0)
+  const [mentionClosed, setMentionClosed] = useState<string | null>(null)
   const [slashClosed, setSlashClosed] = useState<string | null>(null)   // the draft text the menu was closed for (Escape); it reopens when the text changes
   const [slashSkills, setSlashSkills] = useState<{ id: string; name: string; description: string }[]>([])
   const [slashPlugins, setSlashPlugins] = useState<NajdPluginCommand[]>([])
@@ -381,6 +397,7 @@ export function App() {
     if (!window.najdSessions || busy || importing || approval) return
     try {
       const session = await window.najdSessions.get(id)
+      setShownProject(null)
       setActiveSessionId(id)
       setMessages(session.messages)
       setSettingsOpen(false)
@@ -389,12 +406,19 @@ export function App() {
     } catch { setNotice('history') }
   }
 
+  // A new chat starts clean (owner request 2026-10-31): no attachments, files or activity of another chat; only the
+  // personality settings carry over. Earlier chats are brought in on purpose with @.
   function newChat() {
     if (busy || importing || approval || !historyReady) return
     setSettingsOpen(false)
     setActiveSessionId(null)
     setDraft('')
     setMessages([])
+    setAttachments([])
+    setMentions([])
+    setWorkRuns(runs => runs.filter(run => run.sessionId !== null))
+    setChatProject(null)
+    setShownProject(null)
     setNotice(null)
     setExportFeedback(null)
   }
@@ -571,6 +595,17 @@ export function App() {
   const slashMatches = slashText !== null && slashClosed !== draft && !busy && !approval ? filterSlash(slashItems, slashText) : []
   const slashOpen = slashMatches.length > 0
   const slashActive = Math.min(slashIndex, Math.max(0, slashMatches.length - 1))
+  // The "@" menu: earlier chats by title, while the last word of the message starts with @.
+  const mentionText = slashOpen ? null : mentionQuery(draft)
+  const mentionMatches = mentionText !== null && mentionClosed !== draft && !busy && !approval ? filterMentionable(sessions, mentionText, activeSessionId) : []
+  const mentionOpen = mentionMatches.length > 0
+  const mentionActive = Math.min(slashIndex, Math.max(0, mentionMatches.length - 1))
+  function chooseMention(item: { id: string; title: string }) {
+    setSlashIndex(0)
+    setMentions(list => [...list.filter(entry => entry.id !== item.id), { id: item.id, title: item.title }])
+    setDraft(text => insertMention(text, item.title))
+    requestAnimationFrame(() => composerRef.current?.focus())
+  }
   function chooseSlash(item: SlashItem) {
     if (item.disabled) return
     setSlashIndex(0)
@@ -619,7 +654,6 @@ export function App() {
     const report = (patch: Parameters<NonNullable<typeof window.najdBrowser>['askUpdate']>[1]) => { if (ask.askId) void window.najdBrowser?.askUpdate(ask.askId, patch).catch(() => {}) }
     if (!text || busy || importing || providers.connectionBusy || approval || !historyReady || !recoveryReady) return false
     const assetIds = ask.fresh ? [] : selectChatAssetIds(messages, attachments)
-    if (assetIds.length && !['chatgpt', 'openai-api', 'kimi-code', 'ollama'].includes(providers.provider)) { setNotice('attachmentProvider'); return false }
     const activeProvider = providers.provider
     const activeModel = providers.model
     const activeEffort = providers.effort
@@ -636,6 +670,8 @@ export function App() {
         if (!sessionId) {
           sessionId = (await window.najdSessions.create()).id
           setActiveSessionId(sessionId)
+          // A chat started from a project joins it before its first request, so that request already has the project.
+          if (chatProject && !ask.fresh && window.najdProjects) { await window.najdProjects.assign(sessionId, chatProject).catch(() => {}); setChatProject(null); void refreshProjects() }
         }
         // Already saved: used as it is, unless the text is not the conversation's last message yet (then it is saved now, so the request
         // and the conversation always agree).
@@ -650,11 +686,18 @@ export function App() {
       }
       stored = true
       scroll.toLatest()
-      if (!ask.askId) { setDraft(''); setAttachments([]) }
+      // Earlier chats mentioned with @ in this message: their newest messages are quoted for the model right before it.
+      // They stay referenced for the rest of this conversation (kept on this computer by conversation id).
+      const referenced = ask.fresh || ask.askId ? [] : rememberMentions(sessionId, activeMentions(text, mentions))
+      if (!ask.askId) { setDraft(''); setAttachments([]); setMentions([]) }
+      const quoted = referenced.length && window.najdSessions ? referenceBlock((await Promise.all(referenced.map(item => window.najdSessions!.get(item.id).catch(() => null))))
+        .filter((chat): chat is NonNullable<typeof chat> => !!chat).map(chat => ({ title: chat.title || '', messages: chat.messages }))) : null
+      const modelHistory = buildModelHistory(transcript)
+      if (quoted) modelHistory.splice(modelHistory.length - 1, 0, { role: 'user', text: quoted })
       if (!window.najdCore) { setNotice('runtime'); report({ state: 'failed', progress: 'RUNTIME_UNAVAILABLE' }); return false }
       if (ask.askId && cancelledAsks.current.has(ask.askId)) return false
       workKey = beginWork(sessionId, transcript.length)
-      let task = await window.najdCore.startTask(text, crypto.randomUUID(), activeProvider, activeModel || undefined, buildModelHistory(transcript), activeEffort, assetIds,
+      let task = await window.najdCore.startTask(text, crypto.randomUUID(), activeProvider, activeModel || undefined, modelHistory, activeEffort, assetIds,
         sessionId || undefined, pinnedProfile(sessionId) || undefined, accessMode, ask.browserContext, ask.askId)
       started = true
       recordWork(workKey, task)
@@ -679,7 +722,8 @@ export function App() {
         report({ state: task.state === 'COMPLETED' ? 'done' : 'failed', output: task.output, progress: task.state === 'COMPLETED' ? '' : 'UNKNOWN_EFFECT', needsApproval: false })
       } else {
         report({ state: task.state === 'CANCELLED' ? 'cancelled' : 'failed', progress: typeof task.errorCode === 'string' ? task.errorCode : task.state, needsApproval: false })
-        const key = noticeForError(task.errorCode)
+        // Every model gets the attachments; one that refuses them (a model that cannot see pictures) is named as the reason.
+        const key = assetIds.length && ['TOOLS_NOT_SUPPORTED', 'PROVIDER_REJECTED'].includes(String(task.errorCode)) ? 'attachmentProvider' : noticeForError(task.errorCode)
         setNoticeCode(key === 'error' && typeof task.errorCode === 'string' && /^[A-Z_]{2,40}$/.test(task.errorCode) ? task.errorCode : null)
         setNotice(key === 'error' && task.proposedTool === 'read-file' ? 'fileGeneric' : key)
       }
@@ -728,6 +772,8 @@ export function App() {
   }, [messages, workRuns, activeSessionId])
   // The activity the side panel describes: the live or latest run of this conversation, else the last saved reply's.
   const currentActivity = useMemo(() => {
+    // A chat not saved yet has no activity of its own; a run without a conversation never shows in another chat.
+    if (!activeSessionId) return undefined
     const run = [...workRuns].reverse().find(item => item.sessionId === activeSessionId && item.activity)
     return run?.activity ?? [...messages].reverse().find(message => message.activity)?.activity
   }, [workRuns, messages, activeSessionId])
@@ -794,6 +840,22 @@ export function App() {
       <button className="new-chat" aria-label={t.newChat} disabled={busy || !!approval || !historyReady} onClick={newChat}>
         <Plus size={18} strokeWidth={2} /> <span>{t.newChat}</span>
       </button>
+      <div className="sidebar-label sidebar-label-row"><span>{isArabic ? 'المشاريع' : 'Projects'}</span>
+        <button type="button" className="sidebar-add" aria-label={isArabic ? 'مشروع جديد' : 'New project'} title={isArabic ? 'مشروع جديد' : 'New project'} disabled={busy || !!approval || !window.najdProjects}
+          onClick={() => setNewProjectName(value => value === null ? '' : null)}><FolderPlus size={15} /></button></div>
+      {newProjectName !== null && <form className="project-create" onSubmit={event => { event.preventDefault(); void (async () => {
+        const name = newProjectName.trim()
+        if (!name || !window.najdProjects) return
+        try { const created = await window.najdProjects.save({ name, instructions: '' }); setNewProjectName(null); await refreshProjects(); setSettingsOpen(false); setShownProject(created.id) } catch { setNotice('error') }
+      })() }}>
+        <input autoFocus value={newProjectName} maxLength={80} dir="auto" placeholder={isArabic ? 'اسم المشروع' : 'Project name'} aria-label={isArabic ? 'اسم المشروع' : 'Project name'}
+          onChange={event => setNewProjectName(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setNewProjectName(null) }} />
+        <button type="submit" className="browser-action" disabled={!newProjectName.trim()}>{isArabic ? 'إنشاء' : 'Create'}</button>
+      </form>}
+      {projects.length > 0 && <div className="project-list">{projects.map(project => <button key={project.id} type="button"
+        className={'project-row' + (shownProject === project.id || (!shownProject && projectOfChat(activeSessionId)?.id === project.id) ? ' active' : '')}
+        disabled={busy || !!approval} onClick={() => { setSettingsOpen(false); setShownProject(project.id) }}>
+        <FolderKanban size={15} aria-hidden="true" /><span dir="auto">{project.name}</span><small>{project.chats.length || ''}</small></button>)}</div>}
       <div className="sidebar-label">{t.chats}</div>
       <label className="session-search"><Search size={15} /><span className="sr-only">{t.searchChats}</span>
         <input type="search" value={searchQuery} maxLength={100} placeholder={t.searchChats} onChange={event => setSearchQuery(event.target.value)} />
@@ -932,15 +994,22 @@ export function App() {
         </div>
       </div>
     </main></div>}
-    <main className="chat-area" data-calm={messages.length > 0} inert={settingsOpen || undefined}>
+    <main className="chat-area" data-calm={messages.length > 0} data-project={shownProject ? 'open' : undefined} inert={settingsOpen || undefined}>
       {preferences.theme === 'graphite' && <Starfield calm={messages.length > 0} />}
       <header className="topbar"><div className="topbar-title"><strong>{t.app}</strong></div><div className="chat-header-actions">
-        {activeSessionId && <button type="button" className="topbar-export" disabled={busy || !!approval} onClick={() => { void exportChat() }} title={t.exportChat} aria-label={t.exportChat}><Download size={16} /><span>{t.exportChat}</span></button>}
+        {activeSessionId && !shownProject && <button type="button" className="topbar-export" disabled={busy || !!approval} onClick={() => { void exportChat() }} title={t.exportChat} aria-label={t.exportChat}><Download size={16} /><span>{t.exportChat}</span></button>}
         </div>
         {/* The panel opens on the physical right in both languages, so its button sits at the right edge too. */}
         <button type="button" ref={panelToggle} className="topbar-panel" aria-pressed={panelOpen} aria-controls="side-panel" onClick={() => setPanelOpen(open => !open)}
           title={panelOpen ? t.panel.hide : t.panel.show} aria-label={panelOpen ? t.panel.hide : t.panel.show}><PanelRight size={17} /></button></header>
       {exportFeedback && <div className="export-feedback" role="status">{exportFeedback}</div>}
+      {shownProject && projects.some(project => project.id === shownProject) && <ProjectView project={projects.find(project => project.id === shownProject)!} language={preferences.language}
+        sessions={sessions} busy={busy || !!approval}
+        onChanged={updated => setProjects(list => list.map(project => project.id === updated.id ? updated : project))}
+        onRemoved={() => { setShownProject(null); void refreshProjects() }}
+        onOpenChat={id => { void openSession(id) }}
+        onNewChat={() => { const id = shownProject; newChat(); setChatProject(id); requestAnimationFrame(() => composerRef.current?.focus()) }}
+        onClose={() => setShownProject(null)} />}
       {updates.status && ['available', 'manual', 'ready'].includes(updates.status.state) && <button className="update-notice" data-update="notice" onClick={openUpdates}>{t.updates.notice} {updates.status.version}</button>}
       <div className="chat-content">
         <div className="chat-scroll" ref={scroll.ref} onScroll={scroll.onScroll}>
@@ -952,10 +1021,10 @@ export function App() {
               const run: WorkRun | undefined = message.activity ? {key:`saved:${index}`,sessionId:activeSessionId,afterIndex:index,
                 startedAt:Date.parse(message.activity.startedAt),finishedAt:message.activity.finishedAt ? Date.parse(message.activity.finishedAt) : undefined,
                 steps:[],activity:message.activity} : message.role === 'assistant' ? workRuns.find(run => run.sessionId === activeSessionId && run.afterIndex === index) : undefined
-              return <ChatMessage key={index} message={message} language={preferences.language} activity={run && <TaskActivity run={run} language={preferences.language} />} />
+              return <ChatMessage key={index} message={message} language={preferences.language} activity={run && <TaskActivity run={run} language="en" />} />
             })}</div></CanvasProvider>}
           {/* The run stays below the conversation until its answer arrives, also when messages the owner added to it came after its start (owner live test 2026-10-25). */}
-          {workRuns.filter(run => run.sessionId === activeSessionId && !messages.slice(run.afterIndex).some(item => item.role === 'assistant')).slice(-1).map(run => <div className="pending-activity" key={run.key}><TaskActivity run={run} language={preferences.language} onStop={busy && activeTaskId ? () => { void stopTask() } : approval?.taskId ? () => { void stopWaitingTask() } : undefined} onRetry={!busy && lastUserText ? () => setDraft(lastUserText) : undefined} /></div>)}
+          {workRuns.filter(run => run.sessionId === activeSessionId && !messages.slice(run.afterIndex).some(item => item.role === 'assistant')).slice(-1).map(run => <div className="pending-activity" key={run.key}><TaskActivity run={run} language="en" onStop={busy && activeTaskId ? () => { void stopTask() } : approval?.taskId ? () => { void stopWaitingTask() } : undefined} onRetry={!busy && lastUserText ? () => setDraft(lastUserText) : undefined} /></div>)}
           {/* Phase 12: a request that never got its answer in this session's view (NAJD closed or stopped while it worked) can be resumed;
               the action recovery above lists any step whose outcome is unknown, and the model is asked to check before repeating. */}
           {!busy && !approval && !importing && messages.length > 0 && messages.at(-1)?.role === 'user' && !workRuns.some(run => run.sessionId === activeSessionId) &&
@@ -963,15 +1032,15 @@ export function App() {
               <span>{preferences.language === 'ar' ? 'لم يصل رد على هذا الطلب: توقف نجد أو انقطع العمل قبل أن يكتمل.' : 'This request never got its answer: NAJD stopped or the work was interrupted before it finished.'}</span>
               <button type="button" className="browser-action" onClick={() => { void submitText(messages.at(-1)!.text, { alreadySaved: true }) }}>{preferences.language === 'ar' ? 'أكمل الطلب' : 'Resume the request'}</button>
             </div>}
-          {approval && <div className="approval-card" role="alert">
-            <div className="approval-heading"><ShieldCheck size={18} /><strong>{t.approvalTitle}</strong></div>
-            <p className="approval-summary" dir="auto">{approval.agent ? approval.agent.summary : approval.localOnly ? approval.fromSkill ? t.capabilities.readApproval : t.modelReadApproval : approval.tool === 'find-documents' ? t.approvalFind : approval.tool === 'windows-demo' ? t.approvalWindowsDemo : approval.tool === 'windows-apps' ? t.approvalApps : t.approvalReadFile}</p>
+          {approval && <div className="approval-card" role="alert" dir="ltr" lang="en">
+            <div className="approval-heading"><ShieldCheck size={18} /><strong>{tEn.approvalTitle}</strong></div>
+            <p className="approval-summary" dir="auto">{approval.agent ? approval.agent.summary : approval.localOnly ? approval.fromSkill ? tEn.capabilities.readApproval : tEn.modelReadApproval : approval.tool === 'find-documents' ? tEn.approvalFind : approval.tool === 'windows-demo' ? tEn.approvalWindowsDemo : approval.tool === 'windows-apps' ? tEn.approvalApps : tEn.approvalReadFile}</p>
             <code dir="ltr">{approval.path}</code>
             {approval.agent?.body && <pre className="approval-body" dir="ltr">{approval.agent.body}</pre>}
             <div className="approval-actions">
-              <button type="button" className="approval-allow" disabled={busy} onClick={() => { void respondToApproval('ALLOW_ONCE') }}>{t.approvalAllowOnce}</button>
-              {approval.agent && <button type="button" className="approval-allow-task" disabled={busy} onClick={() => { void respondToApproval('ALLOW_TASK') }}>{t.approvalAllowTask}</button>}
-              <button type="button" className="approval-deny" disabled={busy} onClick={() => { void respondToApproval('DENY') }}>{t.approvalDeny}</button>
+              <button type="button" className="approval-allow" disabled={busy} onClick={() => { void respondToApproval('ALLOW_ONCE') }}>{tEn.approvalAllowOnce}</button>
+              {approval.agent && <button type="button" className="approval-allow-task" disabled={busy} onClick={() => { void respondToApproval('ALLOW_TASK') }}>{tEn.approvalAllowTask}</button>}
+              <button type="button" className="approval-deny" disabled={busy} onClick={() => { void respondToApproval('DENY') }}>{tEn.approvalDeny}</button>
             </div>
           </div>}
           {localPreview && localPreview.sessionId === activeSessionId && <section className="local-file-preview" aria-label={t.modelLocalPreviewTitle}>
@@ -990,11 +1059,23 @@ export function App() {
             onDrop={event => { event.preventDefault(); setDragging(false); void addTransfer(event.dataTransfer, 'drop') }}>
             {dragging && <div className="composer-drop" aria-hidden="true">{isArabic ? 'أفلت الملفات لإرفاقها' : 'Drop files to attach'}</div>}
             {slashOpen && <SlashMenu id="slash-menu" items={slashMatches} index={slashActive} language={preferences.language} onChoose={chooseSlash} onHover={setSlashIndex} />}
+            {mentionOpen && <ul className="slash-menu mention-menu" id="mention-menu" role="listbox" aria-label={isArabic ? 'المحادثات السابقة' : 'Earlier chats'}>
+              <li role="presentation"><div className="slash-group" aria-hidden="true">{isArabic ? 'المحادثات السابقة' : 'Earlier chats'}</div></li>
+              {mentionMatches.map((item, position) => <li key={item.id} role="presentation">
+                <div role="option" id={`mention-menu-${item.id}`} aria-selected={position === mentionActive} className={'slash-item' + (position === mentionActive ? ' active' : '')}
+                  onMouseEnter={() => setSlashIndex(position)} onMouseDown={event => { event.preventDefault(); chooseMention(item) }}>
+                  <MessageSquareText size={15} aria-hidden="true" /><span className="slash-label" dir="auto">{item.title}</span>
+                  <small className="slash-hint" dir="auto">{new Date(item.updatedAt).toLocaleDateString(isArabic ? 'ar' : 'en')}</small>
+                </div></li>)}
+            </ul>}
+            {(() => { const project = chatProject ? projects.find(item => item.id === chatProject) : projectOfChat(activeSessionId); return project
+              ? <div className="composer-project"><FolderKanban size={13} aria-hidden="true" /><span>{isArabic ? 'في مشروع: ' : 'In project: '}<bdi dir="auto">{project.name}</bdi></span>
+                {chatProject && !activeSessionId && <button type="button" className="icon-button" aria-label={isArabic ? 'بدون مشروع' : 'No project'} onClick={() => setChatProject(null)}>×</button>}</div> : null })()}
             <AttachmentChips items={attachments} ar={isArabic} disabled={busy || importing} onChange={setAttachments} />
             <label className="sr-only" htmlFor="prompt">{t.prompt}</label>
             <textarea id="prompt" rows={2} placeholder={t.prompt} value={draft} ref={composerRef}
-              role={slashOpen ? 'combobox' : undefined} aria-expanded={slashOpen ? true : undefined} aria-controls={slashOpen ? 'slash-menu' : undefined} aria-autocomplete={slashOpen ? 'list' : undefined}
-              aria-activedescendant={slashOpen ? `slash-menu-${slashMatches[slashActive].id}` : undefined}
+              role={slashOpen || mentionOpen ? 'combobox' : undefined} aria-expanded={slashOpen || mentionOpen ? true : undefined} aria-controls={slashOpen ? 'slash-menu' : mentionOpen ? 'mention-menu' : undefined} aria-autocomplete={slashOpen || mentionOpen ? 'list' : undefined}
+              aria-activedescendant={slashOpen ? `slash-menu-${slashMatches[slashActive].id}` : mentionOpen ? `mention-menu-${mentionMatches[mentionActive].id}` : undefined}
               onChange={event => { setDraft(event.target.value); setSlashIndex(0); const field = event.currentTarget; field.style.height = 'auto'; field.style.height = field.scrollHeight + 'px' }}
               onPaste={event => { if (Array.from(event.clipboardData.items).some(item => item.kind === 'file' && item.type.startsWith('image/'))) { event.preventDefault(); void addTransfer(event.clipboardData, 'paste') } }}
               onKeyDown={event => {
@@ -1003,6 +1084,12 @@ export function App() {
                   if (event.key === 'ArrowUp') { event.preventDefault(); setSlashIndex((slashActive - 1 + slashMatches.length) % slashMatches.length); return }
                   if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); chooseSlash(slashMatches[slashActive]); return }
                   if (event.key === 'Escape') { event.preventDefault(); setSlashClosed(draft); return }
+                }
+                if (mentionOpen) {
+                  if (event.key === 'ArrowDown') { event.preventDefault(); setSlashIndex((mentionActive + 1) % mentionMatches.length); return }
+                  if (event.key === 'ArrowUp') { event.preventDefault(); setSlashIndex((mentionActive - 1 + mentionMatches.length) % mentionMatches.length); return }
+                  if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); chooseMention(mentionMatches[mentionActive]); return }
+                  if (event.key === 'Escape') { event.preventDefault(); setMentionClosed(draft); return }
                 }
                 if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
               }} />
@@ -1020,7 +1107,7 @@ export function App() {
       </div>
     </main>
     {canvas && !settingsOpen && <CanvasPanel item={canvas} language={preferences.language} onClose={() => setCanvas(null)} />}
-    {panelOpen && !settingsOpen && !canvas && <SidePanel t={t} language={preferences.language} conversationId={activeSessionId} provider={providers.provider} model={providers.model}
+    {panelOpen && !settingsOpen && !canvas && <SidePanel t={tEn} language="en" conversationId={activeSessionId} provider={providers.provider} model={providers.model}
       modelWindow={providers.models[providers.provider]?.find(item => item.id === providers.model)?.contextWindow ?? null} busy={busy}
       browserConnected={browserStatus.connected} activity={currentActivity} pinned={pinnedProfile(activeSessionId)} onClose={closePanel} onOpen={openSettingsAt}
       onPin={pinProfile} />}

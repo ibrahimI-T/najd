@@ -20,6 +20,52 @@ function fullRuntime(extra = {}) {
 }
 const names = request => request.tools.map(tool => tool.name)
 
+test('computer requests select observation tools across context sizes without claiming vision', async () => {
+  for (const text of ['افتح المفكرة', 'اقرأ الشاشة', 'اضغط الزر في النافذة', 'Open the calculator app', 'Take a screenshot']) {
+    assert.equal(selectProfile({ text }).profile, 'computer', text)
+  }
+  assert.equal(selectProfile({ text: 'Build a desktop app in TypeScript' }).profile, 'coding')
+  for (const inputBudget of [24000, 48000, 192000]) {
+    await fullRuntime().run({ request: { text: 'اقرأ الشاشة', inputBudget, vision: false }, respond: async request => {
+      assert.ok(names(request).includes('najd_desktop_windows'))
+      assert.ok(names(request).includes('najd_desktop_read'))
+      assert.equal(new Set(names(request)).size, names(request).length)
+      assert.ok(request.tools.length <= 24)
+      return { kind: 'message', text: 'Ready to observe.' }
+    } })
+  }
+})
+
+test('relevant NAJD guides stay discoverable ahead of generic matches without injecting bodies', async () => {
+  const rows = Array.from({ length: 8 }, (_, index) => ({ id: 'upstream-' + index, title: 'code guide', description: 'code workflow', kind: 'skill', mode: 'instructions', ready: true }))
+  rows.push({ id: 'najd-code-engineering', title: 'Code engineering', description: 'code workflow', kind: 'skill', mode: 'instructions', ready: true })
+  let reads = 0
+  await fullRuntime({ catalog: { list: async () => rows, summary: async () => '' }, skills: { read: async () => { reads++; return { text: 'PRIVATE_GUIDE_BODY' } } } })
+    .run({ request: { text: 'fix this code' }, respond: async request => {
+      assert.match(request.instructions, /najd-code-engineering/)
+      assert.doesNotMatch(request.instructions, /PRIVATE_GUIDE_BODY/)
+      return { kind: 'message', text: 'Ready.' }
+    } })
+  assert.equal(reads, 0)
+})
+
+test('incomplete toolsets never claim readiness or partially replace working tools', () => {
+  const definitions = ['najd_web_search', 'najd_files_list', 'najd_files_read', 'najd_files_search'].map(name => ({ name }))
+  const manager = createToolsetManager({ definitions, ready: () => true })
+  assert.equal(manager.addToolset('web'), 'NOT_READY')
+  assert.equal(manager.loadable().includes('web'), false)
+  assert.deepEqual(manager.tools(), [])
+  assert.deepEqual(manager.loaded(), [])
+  assert.equal(manager.addToolset('files-read'), 'LOADED')
+  const before = manager.tools()
+  assert.equal(manager.replaceToolsets(['files-read'], 'web'), 'NOT_READY')
+  assert.deepEqual(manager.tools(), before)
+  assert.deepEqual(manager.loaded(), ['files-read'])
+  assert.equal(manager.wasUnloaded('files-read'), false)
+  for (let index = 0; index < 3; index++) manager.addToolset('files-read')
+  assert.equal(new Set(manager.tools().map(tool => tool.name)).size, manager.tools().length)
+})
+
 test('profile selection: pin, then the current request intent and attachments, then the previous profile, then general', () => {
   assert.equal(selectProfile({ text: 'اكتب لي سكربت بايثون يرتب الملفات' }).profile, 'coding')
   assert.equal(selectProfile({ text: 'Fix this bug in my repo' }).profile, 'coding')
@@ -128,8 +174,8 @@ test('M2-007: unload makes room atomically; core and memory stay; unloaded tools
   } }).catch(error => error)
   assert.equal(outputs[0].error, 'NOT_ALLOWED')
   assert.equal(outputs[1].status, 'loaded'); assert.equal(outputs[1].loaded.includes('terminal'), false)
-  // Calling the unloaded terminal afterwards is invalid: it is not silently loaded back.
-  assert.equal(result.code, 'INVALID_MODEL_OUTPUT')
+  // Calling the unloaded terminal afterwards is refused, never run and never silently loaded back; the task continues.
+  assert.equal(outputs[2].error, 'UNKNOWN_TOOL'); assert.equal(result.text, 'ok')
 })
 
 test('M2-R2-005: each profile\'s own toolsets stay at or under 22 tools, leaving room for MCP and attachments', () => {

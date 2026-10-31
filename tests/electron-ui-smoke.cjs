@@ -348,7 +348,7 @@ async function main() {
     await click(instance.client, '#prompt')
     await instance.client.send('Input.insertText', { text: '/تطبيقات' })
     await click(instance.client, '.send-button')
-    await waitFor(async () => (await evaluate(instance.client, 'document.querySelector(".approval-card")?.innerText || document.body.innerText')).includes('لن يفتحها'))
+    await waitFor(async () => (await evaluate(instance.client, 'document.querySelector(".approval-card")?.innerText || document.body.innerText')).includes('It will not open them'))
     await click(instance.client, '.approval-deny')
     await waitFor(async () => (await evaluate(instance.client, 'document.body.innerText')).includes('لم يتم التحقق من التطبيقات'))
     // The Windows companion may be connected at startup (owner default); a denial must still allow no Windows action.
@@ -387,7 +387,7 @@ async function main() {
         await click(instance.client, '#prompt')
         await instance.client.send('Input.insertText', { text: `/windows ${app}` })
         await click(instance.client, '.send-button')
-        await waitFor(async () => (await evaluate(instance.client, 'document.body.innerText')).includes('نافذة اختبار مستقلة'))
+        await waitFor(async () => (await evaluate(instance.client, 'document.body.innerText')).includes('separate test window'))
         await click(instance.client, '.approval-allow')
         try {
           await waitFor(async () => (await evaluate(instance.client, 'document.body.innerText.split("اكتمل اختبار Windows وتحققت كل الخطوات.").length')) > before, 45000)
@@ -500,7 +500,7 @@ async function main() {
       await click(instance.client, '#prompt')
       await instance.client.send('Input.insertText', { text: `/ask-read ${path.join(fixtures, 'model-tool.txt')}` })
       await click(instance.client, '.send-button')
-      await waitFor(async () => (await evaluate(instance.client, 'document.querySelector(".approval-card")?.innerText || ""')).includes('النموذج اقترح قراءة الملف المحدد'))
+      await waitFor(async () => (await evaluate(instance.client, 'document.querySelector(".approval-card")?.innerText || ""')).includes('The model proposed reading the exact named file'))
       await click(instance.client, decision === 'DENY' ? '.approval-deny' : '.approval-allow')
       if (decision === 'DENY') {
         await waitFor(async () => await evaluate(instance.client, 'document.querySelector(".approval-card") === null'))

@@ -239,8 +239,8 @@ function createMemoryService({ directory, learning, notes, sessions, files, now 
     return [...kept.values()]
   }
 
-  // opts: { query, conversationId, budgetTokens, record }. Returns null when the graph engine is not in use (the caller then uses the old engine).
-  async function context({ query, conversationId = null, budgetTokens = 700, record = true } = {}) {
+  // opts: { query, conversationId, budgetTokens, record, earlierChats } (false leaves out excerpts of other conversations). Returns null when the graph engine is not in use (the caller then uses the old engine).
+  async function context({ query, conversationId = null, budgetTokens = 700, record = true, earlierChats = true } = {}) {
     // A request never waits long for a first migration of a very large memory: it is answered by the previous engine and the next one finds the graph ready.
     const ready = await Promise.race([start().then(() => true), new Promise(resolve => { const timer = setTimeout(() => resolve(false), 2500); timer.unref?.() })])
     if (!ready || !db || settings.engine !== 'graph') return null
@@ -251,11 +251,11 @@ function createMemoryService({ directory, learning, notes, sessions, files, now 
     const scopes = ['global', ...(conversationId ? ['conversation:' + conversationId] : [])]
     const askable = typeof query === 'string' && query.length <= 4000 && !looksSecret(query)
     const stems = askable ? stemsOf(query) : [], entityNorms = askable ? [...entitiesOf(query).keys()] : []
-    const key = [db.version, kinds.join(), scopes.join(), stems.join(), entityNorms.join(), budgetTokens, settings.shareChats ? 1 : 0].join('|')
+    const key = [db.version, kinds.join(), scopes.join(), stems.join(), entityNorms.join(), budgetTokens, settings.shareChats && earlierChats ? 1 : 0].join('|')
     let result = cache.get(key), cached = false
     if (result) { cached = true; cache.delete(key); cache.set(key, result) }
     else {
-      result = compose({ kinds, scopes, stems, entityNorms, budgetTokens, conversationId, askable })
+      result = compose({ kinds, scopes, stems, entityNorms, budgetTokens, conversationId, askable, earlierChats })
       cache.set(key, result); while (cache.size > 64) cache.delete(cache.keys().next().value)
     }
     const ms = performance.now() - began
@@ -263,7 +263,7 @@ function createMemoryService({ directory, learning, notes, sessions, files, now 
     return { engine: 'graph', text: result.text, tokens: result.tokens, items: result.trace, ms, cached, dropped: result.dropped }
   }
 
-  function compose({ kinds, scopes, stems, entityNorms, budgetTokens, conversationId, askable }) {
+  function compose({ kinds, scopes, stems, entityNorms, budgetTokens, conversationId, askable, earlierChats = true }) {
     const current = now()
     const trace = [], dropped = { duplicates: 0, overBudget: 0, flagged: 0 }
     const pinnedKinds = kinds.filter(kind => kind === 'preference')
@@ -321,7 +321,7 @@ function createMemoryService({ directory, learning, notes, sessions, files, now 
     for (const entry of chosen) trace.push({ id: entry.row.uid, kind: entry.row.kind, source: entry.row.source, title: trim(entry.row.title, 60), reason: entry.reason, score: Math.round(entry.score * 100) / 100, tokens: entry.tokens })
     // Excerpts of earlier conversations (never the current one, which is already in the history).
     const excerpts = []
-    if (settings.shareChats && askable && stems.length) {
+    if (settings.shareChats && earlierChats && askable && stems.length) {
       const perChat = new Map()
       const room = budgetTokens - spent
       let used = 0

@@ -28,12 +28,14 @@ const setup = options => {
   return { host, journal, tools: createDesktopTools({ host, journal, verifyMs: 300, resolveReadable: input => { if (input.includes('..')) throw Object.assign(new Error('PATH_NOT_ALLOWED'), { code: 'PATH_NOT_ALLOWED' }); return path.join(root, input) } }) }
 }
 
-test('a window is read only after listing it and one approval per run; acts need their own approval', async () => {
+test('a window is read from a fresh list and one approval per run; acts need their own approval', async () => {
   const { tools, host } = setup()
   const cards = []
   const ctx = { runId: 'run-1', requestApproval: async tool => { cards.push(tool); return 'ALLOW_ONCE' } }
-  await assert.rejects(tools.read({ window: '101' }, ctx), { code: 'NOT_FOUND' })
-  await tools.windows({}, ctx)
+  // An id no open window has is refused with directions; a listed window is found without a separate list call
+  // (owner live test 2026-10-31), and reading it still needs its approval.
+  await assert.rejects(tools.read({ window: '999' }, ctx), { code: 'NOT_FOUND', hint: /najd_desktop_windows/ })
+  assert.deepEqual(cards, [])
   const first = await tools.read({ window: '101' }, ctx)
   await tools.read({ window: '101' }, ctx)
   assert.deepEqual(cards, ['najd-desktop-read'])
@@ -41,6 +43,9 @@ test('a window is read only after listing it and one approval per run; acts need
   assert.equal(first.elements[1].sensitive, true); assert.equal('value' in first.elements[1], false)
   const typed = await tools.act({ window: '101', element: 'e1', action: 'setValue', text: 'Ibrahim' }, ctx)
   assert.equal(typed.status, 'done'); assert.deepEqual(cards, ['najd-desktop-read', 'najd-desktop-act'])
+  // The window is read again after the action, without another approval, and the action is sent once.
+  assert.deepEqual(typed.after.elements.map(item => item.id), ['e1', 'e2', 'e3'])
+  assert.equal(host.calls.filter(([name]) => name === 'najd.desktop.act').length, 1)
   const sent = host.calls.find(([name]) => name === 'najd.desktop.act')[1]
   assert.deepEqual([sent.element, sent.name, sent.automationId, sent.controlType, sent.pid, sent.created, sent.key, sent.title], ['42.1', 'Full name', 'name', 50004, 7, '99', 'key-full-name', 'Order form'])
 })
@@ -120,7 +125,10 @@ test('M2-R2-006: a call without its run is refused, and ending a run drops what 
   const ctx = { runId: 'run-end', requestApproval: async () => 'ALLOW_ONCE' }
   await tools.windows({}, ctx); await tools.read({ window: '101' }, ctx)
   tools.endRun('run-end')
-  await assert.rejects(tools.read({ window: '101' }, ctx), { code: 'NOT_FOUND' })
+  // What the ended run read and was allowed is gone: reading again needs a new approval.
+  let asked = 0
+  await tools.read({ window: '101' }, { ...ctx, requestApproval: async () => { asked++; return 'DENY' } })
+  assert.equal(asked, 1)
 })
 
 test('M2-R3-005: a lost answer after sending an action is an unknown effect, not a refusal', async () => {
@@ -191,7 +199,8 @@ test('M2-R9-003: repeated screenshots keep only the newest image; with no free i
   const runtime = createAgentRuntime({ catalog: { search: async () => [], details: async () => ({}) }, library, desktop })
   const images = input => input.reduce((count, item) => count + (Array.isArray(item.content) ? item.content.filter(part => part.type === 'input_image').length : 0), 0)
   const steps = [call('najd_desktop_windows', {}, 'w'), call('najd_tools_load', { toolset: 'screen', unload: '' }, 'l'),
-    ...Array.from({ length: 10 }, (_, i) => call('najd_screen_capture', { window: '7' }, 's' + i))]
+    // The window and the whole screen in turn: the same capture five times in a row would be stopped as a loop.
+    ...Array.from({ length: 10 }, (_, i) => call('najd_screen_capture', { window: i % 2 ? '' : '7' }, 's' + i))]
   let turn = 0, last = null
   // The office profile preloads desktop control (design loads it on demand since M3 kept design within the tool budget).
   await runtime.run({ request: { text: 'صمم لي شعار', vision: true, profile: 'office' }, requestApproval: async () => 'ALLOW_ONCE', respond: async request => {
@@ -269,7 +278,7 @@ test('M2-R27-001: a window whose title is too long to show in full is listed but
   assert.equal(listed.windows[0].titleTooLong, true)
   await assert.rejects(tools.read({ window: '8', from: 0 }, ctx), { code: 'NOT_FOUND' })
   await assert.rejects(tools.capture({ window: '8' }, ctx), { code: 'NOT_FOUND' })
-  assert.deepEqual(host.calls, ['najd.desktop.windows'])
+  assert.ok(host.calls.every(name => name === 'najd.desktop.windows'), 'the window is only listed, never read or captured')
 })
 
 test('M2-R28-002: when the host could not read every control, every part of the read says so', async () => {

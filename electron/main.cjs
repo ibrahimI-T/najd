@@ -110,14 +110,10 @@ function najdNode() {
 const { createProcessLifecycle } = require('./process-lifecycle.cjs')
 const { fitAgentHistory } = require('./agent-context.cjs')
 const { createInstructionSkills } = require('./instruction-skills.cjs')
+const { createSkillSurface, najdGuideRows } = require('./skill-surface.cjs')
 const upstreamSkillBundle = require('./upstream-skills.json')
 // NAJD's own instruction guides (electron/najd-skills/*.md, M3-9), checked by digest like the bundled upstream skills.
-const najdSkillRows = require('node:fs').readdirSync(path.join(__dirname, 'najd-skills')).filter(name => name.endsWith('.md')).map(name => {
-  const body = require('node:fs').readFileSync(path.join(__dirname, 'najd-skills', name), 'utf8').replace(/\r\n/g, '\n')
-  const field = key => (new RegExp('^' + key + ': (.+)$', 'm').exec(body) || [])[1] || ''
-  return { id: field('name'), name: field('name'), description: field('description').slice(0, 400), source: 'najd', sourceRevision: null, relativePath: 'najd-skills/' + name,
-    platforms: ['windows'], license: 'NAJD', author: 'NAJD', digest: require('node:crypto').createHash('sha256').update(body).digest('hex'), body }
-})
+const najdSkillRows = najdGuideRows(path.join(__dirname, 'najd-skills'))
 // Open-source design skill packs (skill-packs/, resources/skill-packs when installed), checked against their manifest.
 const { createSkillPacks } = require('./skill-packs.cjs')
 const skillPacks = createSkillPacks({ root: app.isPackaged ? path.join(process.resourcesPath, 'skill-packs') : path.join(__dirname, '..', 'skill-packs') })
@@ -133,6 +129,9 @@ let capabilities
 let mcpConnectors
 let mcpServers
 let knowledgeBases
+// Projects: instructions, files and a folder shared by the chats in each project (electron/project-store.cjs).
+let projects
+const { createProjectStore, projectPrompt } = require('./project-store.cjs')
 let personality
 let learning
 let memoryService
@@ -175,13 +174,18 @@ async function chatWithPersonality(request) {
   const tier = tierOf(providers.inputBudget(request.provider, request.modelName), request.contextMode)
   // Which kind of work this is, so a balanced run sends only the craft lines of the default instructions that apply (selection is repeated by the runtime).
   const guessed = tier.balanced ? selectProfile({ text: request.text, pinned: request.profile, last: request.conversationId ? await runReceipts.lastProfile(request.conversationId).catch(() => null) : null }).profile : 'general'
-  const style = personalityPrompt(await personality.get(), { lean: tier.lean, balanced: tier.balanced ? { profile: guessed, askingAbilities: /what can you|what do you|your abilities|capabilities|what tools|\u0645\u0627\u0630\u0627 \u062a\u0633\u062a\u0637\u064a\u0639|\u0648\u0634 \u062a\u0642\u062f\u0631|\u0627\u064a\u0634 \u062a\u0642\u062f\u0631|\u0642\u062f\u0631\u0627\u062a\u0643/i.test(String(request.text || '')) } : null })
+  const persona = await personality.get()
+  const guidance = providers.modelGuidance(request.provider, request.modelName, { lean: tier.lean, enabled: persona.enabled, internal: request.systemPrompt !== undefined })
+  const style = personalityPrompt(persona, { lean: tier.lean, balanced: tier.balanced ? { profile: guessed, askingAbilities: /what can you|what do you|your abilities|capabilities|what tools|\u0645\u0627\u0630\u0627 \u062a\u0633\u062a\u0637\u064a\u0639|\u0648\u0634 \u062a\u0642\u062f\u0631|\u0627\u064a\u0634 \u062a\u0642\u062f\u0631|\u0642\u062f\u0631\u0627\u062a\u0643/i.test(String(request.text || '')) } : null })
   const memoryChars = tierOf(providers.inputBudget(request.provider, request.modelName), request.contextMode).memoryChars
   // Memory for this request: found in the graph (preferences, the owner's notes, earlier conversations) within a token budget; the previous engine
   // answers when the graph is switched off or unavailable.
-  const recalled = await memoryService?.context({ query: request.text, conversationId: request.conversationId || null, budgetTokens: Math.max(200, Math.floor(memoryChars / 3.2)) }).catch(() => null)
+  // A chat starts fresh (owner request 2026-10-31): saved memories apply, but text of other conversations comes only when the owner mentions one with @.
+  const recalled = await memoryService?.context({ query: request.text, conversationId: request.conversationId || null, budgetTokens: Math.max(200, Math.floor(memoryChars / 3.2)), earlierChats: false }).catch(() => null)
   const preferences = recalled ? recalled.text : await learning.context(request.text, { chars: memoryChars })
-  const systemPrompt = [request.systemPrompt, style, preferences].filter(Boolean).join('\n\n')
+  // A chat in a project gets its instructions, files and folder; other chats get nothing of any project.
+  const project = request.conversationId && !request.systemPrompt ? await projects?.forChat(request.conversationId).catch(() => null) : null
+  const systemPrompt = [request.systemPrompt, style, guidance, preferences, projectPrompt(project)].filter(Boolean).join('\n\n')
   // The agent tool loop runs for ChatGPT, OpenAI, Kimi, and local Ollama models that declare tool support.
   const supported = !request.systemPrompt && await providers.supportsTools(request.provider, request.modelName)
   if (request.assetIds?.length && !supported) throw mainError('TOOLS_NOT_SUPPORTED')
@@ -189,7 +193,10 @@ async function chatWithPersonality(request) {
   let stepped = false
   const routeToken = supported && request.provider !== 'ollama' ? await providers.captureRoute(request.provider, request.modelName) : undefined
   const inputBudget = supported ? providers.inputBudget(request.provider, request.modelName) : null
-  const result = supported ? await agentRuntime.run({ signal: request.signal, assetIds: request.assetIds,
+  // Project files still in the library join the chat's own attachments (the chat's first).
+  const known = project?.files.length ? new Set((await library.list().catch(() => [])).map(item => item.id)) : null
+  const assetIds = known ? [...new Set([...(request.assetIds || []), ...project.files.map(item => item.id).filter(id => known.has(id))])].slice(0, 20) : request.assetIds
+  const result = supported ? await agentRuntime.run({ signal: request.signal, assetIds,
     request: { text: request.text, contextMode: request.contextMode || null, browserContext: request.browserContext || null, profile: request.profile || null, conversationId: request.conversationId || null, runId: request.runId || null, inputBudget,
       // Vision: ChatGPT and OpenAI models see images; a local Ollama model only when it declares vision.
       vision: await providers.visionCapable(request.provider, request.modelName) || request.provider === 'ollama' && (await ollama.capabilities(request.modelName).catch(() => [])).includes('vision'),
@@ -198,7 +205,8 @@ async function chatWithPersonality(request) {
     onEvent: request.onToolEvent, requestApproval: request.requestApproval, takeNotes: request.takeNotes, notesAnswered: request.notesAnswered, respond: ({ instructions, tools, input, signal, isolated, onAdvice }) => {
       const prompt = [systemPrompt, instructions].filter(Boolean).join('\n\n')
       // Each run has its own key; only its first step consults the union references, and a delegated sub-agent never does.
-      const agentTurn = { tools, input, ...(isolated ? { noAdvice: true } : { runKey, continuation: stepped }) }
+      // cacheKey: one key per conversation, so a provider can reuse the cached prompt prefix across its calls.
+      const agentTurn = { tools, input, cacheKey: request.conversationId || runKey, ...(isolated ? { noAdvice: true } : { runKey, continuation: stepped }) }
       if (!isolated) stepped = true
       // A delegated sub-agent sees only its task, never the user's conversation history.
       // A long conversation keeps its newest part word for word; the older part becomes the few earlier messages that bear on this request.
@@ -527,18 +535,8 @@ app.whenReady().then(() => {
   void mcpConnectors.resume()
   const bundledSkills = createInstructionSkills({ filePath: path.join(app.getPath('userData'), 'najd-data/instruction-skills.json'), bundle: { ...upstreamSkillBundle, skills: [...upstreamSkillBundle.skills, ...najdSkillRows, ...skillPacks.rows()] } })
   const externalSkills = createExternalSkills({ directory: path.join(app.getPath('userData'), 'najd-data/external-skills'), owners: () => pluginStore.ownedSkills() })
-  // One skill surface for the model and UI; bundled and user-installed skills keep separate stores.
-  const instructionSkills = {
-    list: async () => [...await bundledSkills.list(), ...await externalSkills.list()],
-    setEnabled: async (id, enabled) => (await externalSkills.has(id) ? externalSkills : bundledSkills).setEnabled(id, enabled),
-    // A skill pack's guide comes with its folder and file list; its other files are read only while the skill is enabled.
-    read: async (id, offset, limit, file) => {
-      if (await externalSkills.has(id)) return file === undefined ? externalSkills.read(id, offset, limit) : Promise.reject(mainError('NOT_FOUND'))
-      const guide = await bundledSkills.read(id, offset, limit)
-      if (!skillPacks.has(id)) { if (file !== undefined) throw mainError('NOT_FOUND'); return guide }
-      return file === undefined ? { ...guide, ...skillPacks.describe(id) } : skillPacks.readFile(id, file, offset, limit)
-    }
-  }
+  // One skill surface for the model and UI; bundled and user-installed skills keep separate stores (electron/skill-surface.cjs).
+  const instructionSkills = createSkillSurface({ bundled: bundledSkills, external: externalSkills, packs: skillPacks })
   // Plugins from outside (plugins.cjs). Install and removal are explicit actions of the owner in Settings; the agent installs only after an in-chat approval.
   const pluginStore = createPlugins({ directory: path.join(app.getPath('userData'), 'najd-data/plugins'), skills: externalSkills })
   const githubUrl = url => { if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+/.test(url) || url.length > 500) throw mainError('INVALID_INPUT'); return url }
@@ -567,6 +565,7 @@ app.whenReady().then(() => {
       const { width, height } = image.getSize(), scale = Math.min(1, 1600 / Math.max(width, height))
       return (scale < 1 ? image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' }) : image).toJPEG(85)
     } })
+  projects = createProjectStore({ filePath: path.join(app.getPath('userData'), 'najd-data', 'projects.json') })
   knowledgeBases = createKnowledgeBases({ filePath: path.join(app.getPath('userData'), 'najd-data', 'knowledge-bases.json'), library })
   // External MCP servers are added only by the user in Settings, after a native confirmation of the exact command.
   mcpServers = createMcpServers({ filePath: path.join(app.getPath('userData'), 'najd-data', 'mcp-servers.json'), encryption: safeStorage, clientVersion: app.getVersion(),
@@ -852,6 +851,31 @@ app.whenReady().then(() => {
   ipcMain.handle('najd:pack:check', event => withWindowSender(event, () => officePack.check()))
   ipcMain.handle('najd:pack:remove', event => withWindowSender(event, () => officePack.remove()))
   ipcMain.handle('najd:skills:list', event => withWindowSender(event, () => instructionSkills.list()))
+  // Projects (owner request 2026-10-31). Files are library items the owner added; a folder is granted only through the
+  // owner's own folder dialog, exactly like Settings > Files.
+  const projectId = value => { if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value)) throw mainError('INVALID_INPUT'); return value }
+  ipcMain.handle('najd:projects:list', event => withWindowSender(event, () => projects.list()))
+  ipcMain.handle('najd:projects:save', (event, input) => withWindowSender(event, () => projects.save({ id: input?.id ? projectId(input.id) : undefined, name: input?.name, instructions: input?.instructions })))
+  ipcMain.handle('najd:projects:remove', (event, id) => withWindowSender(event, () => projects.remove(projectId(id))))
+  ipcMain.handle('najd:projects:assign', (event, chatId, id) => withWindowSender(event, () => projects.assign(projectId(chatId), id === null ? null : projectId(id))))
+  ipcMain.handle('najd:projects:setFiles', (event, id, assetIds) => withWindowSender(event, async () => {
+    if (!Array.isArray(assetIds) || assetIds.length > 20) throw mainError('INVALID_INPUT')
+    const items = await library.list()
+    const files = assetIds.map(value => items.find(item => item.id === value)).filter(Boolean).map(item => ({ id: item.id, name: String(item.name).slice(0, 160).replace(/[\\/\x00-\x1f]/g, '_') }))
+    return projects.setFiles(projectId(id), files)
+  }))
+  ipcMain.handle('najd:projects:chooseFolder', (event, id) => withWindowSender(event, async () => {
+    projectId(id)
+    await fileAccessLoaded
+    const picked = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { properties: ['openDirectory'] })
+    if (picked.canceled || !picked.filePaths[0]) return projects.get(id)
+    const root = path.resolve(picked.filePaths[0])
+    fileRoots.add(root)
+    activityLog.record({ action: 'grant-root', decision: 'allowed', path: root })
+    await saveFileAccess().catch(() => {})
+    return projects.setFolder(id, root)
+  }))
+  ipcMain.handle('najd:projects:clearFolder', (event, id) => withWindowSender(event, () => projects.setFolder(projectId(id), null)))
   ipcMain.handle('najd:skills:enable', (event, id, enabled) => withWindowSender(event, () => instructionSkills.setEnabled(id, enabled)))
   ipcMain.handle('najd:library:list', event => withWindowSender(event, () => library.list()))
   ipcMain.handle('najd:library:search', (event, query) => withWindowSender(event, () => library.search(query)))

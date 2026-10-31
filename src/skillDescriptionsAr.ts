@@ -2,6 +2,10 @@
 // service descriptions are Arabic; everything internal stays English). Keyed by skill name; the English upstream
 // description is shown for any skill without an entry, such as one the user installs later.
 export const SKILL_DESCRIPTIONS_AR: Record<string, string> = {
+  'najd-code-engineering': 'تنفيذ التعديلات البرمجية وتصحيح الأخطاء ومراجعة الكود واختباره داخل المشروع الحالي مع الحفاظ على العمل الموجود.',
+  'najd-computer-control': 'فهم نوافذ ويندوز والتحكم بعناصرها وقراءة الشاشة عند دعم الصور، ثم التحقق من نتيجة كل إجراء.',
+  'najd-research-evidence': 'البحث في المصادر وقراءة الأدلة ومقارنة المعلومات وتوثيق النتائج مع تقليل عمليات البحث المكررة.',
+  'najd-skill-authoring': 'تحويل إجراءات العمل الناجحة إلى مهارات قابلة لإعادة الاستخدام بأدوات نجد الفعلية والتحقق من حفظها.',
   '1password': 'إعداد 1Password واستخدامه لتسجيل الدخول وقراءة كلمات المرور والأسرار وإدخالها بأمان.',
   'apple-notes': 'إنشاء ملاحظات Apple وعرضها وتعديلها والبحث فيها وتصديرها (على macOS).',
   'apple-reminders': 'إدارة تذكيرات Apple وقوائمها: إضافة وتعديل وإكمال وحذف (على macOS).',

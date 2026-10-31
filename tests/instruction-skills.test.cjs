@@ -29,6 +29,31 @@ test('Windows-compatible guidance starts enabled until the user chooses; other p
   await assert.rejects(restarted.list(), { code: 'CAPABILITY_STORE_UNAVAILABLE' })
   assert.equal(await fs.readFile(filePath, 'utf8'), '{broken')
 })
+test('new NAJD execution guides are enabled on upgrade and readable on demand', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-skill-store-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const ids = ['najd-computer-control', 'najd-code-engineering', 'najd-research-evidence', 'najd-skill-authoring']
+  const guides = await Promise.all(ids.map(async id => {
+    const body = (await fs.readFile(path.join(__dirname, '../electron/najd-skills', id + '.md'), 'utf8')).replace(/\r\n/g, '\n')
+    const field = key => new RegExp('^' + key + ': (.+)$', 'm').exec(body)?.[1]
+    assert.equal(field('name'), id)
+    assert.ok(field('description')?.length <= 400)
+    assert.ok(body.length < 5000)
+    return { id, name: id, description: field('description'), source: 'najd', sourceRevision: null,
+      relativePath: 'najd-skills/' + id + '.md', digest: createHash('sha256').update(body).digest('hex'), body }
+  }))
+  const filePath = path.join(root, 'skills.json')
+  await fs.writeFile(filePath, JSON.stringify({ version: 1, enabled: {} }))
+  const store = createInstructionSkills({ filePath, bundle: { version: 1, skills: guides } })
+  assert.equal((await store.list()).filter(row => row.enabled && row.builtIn).length, ids.length)
+  for (const guide of guides) {
+    const page = await store.read(guide.id, 0, 8000)
+    assert.equal(page.text, guide.body)
+    assert.equal(page.hasMore, false)
+    assert.equal(page.mode, 'instructions')
+  }
+})
+
 test('modified bundled skill text cannot be enabled as its original revision', () => {
   assert.throws(() => createInstructionSkills({ filePath: path.resolve('unused.json'), bundle: { version: 1, skills: [{ ...row, body: 'modified' }] } }), { code: 'INCOMPATIBLE_RUNTIME' })
 })

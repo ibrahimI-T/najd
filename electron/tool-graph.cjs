@@ -5,6 +5,7 @@
 // What a lean run loads first, after core and memory (in order, while the start size allows).
 const LEAN_START = {
   general: ['files-read', 'web'],
+  computer: ['desktop-read', 'screen'],
   coding: ['files-read', 'terminal'],
   research: ['web', 'files-read'],
   design: ['files-read', 'media'],
@@ -16,6 +17,7 @@ const LEAN_START = {
 // The rest stay one step away (najd_tools_load, or a call to a tool by name loads its toolset), so nothing is withheld.
 const BALANCED_START = {
   general: null, // already compact: the whole profile
+  computer: ['core', 'memory', 'desktop', 'screen', 'skills'],
   coding: ['core', 'memory', 'files', 'terminal', 'web', 'skills'],
   research: ['core', 'memory', 'web', 'browser', 'library', 'files-read', 'toolbox', 'skills'],
   design: ['core', 'memory', 'files', 'web', 'media', 'library', 'skills'],
@@ -39,6 +41,7 @@ const EDGES = {
   library: ['files-read'],
   chats: ['memory'],
   desktop: ['screen', 'process'],
+  'desktop-read': ['desktop', 'screen'],
   screen: ['desktop'],
   extensions: ['skills'],
   mcp: [],

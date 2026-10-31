@@ -67,6 +67,9 @@ async function main() {
     assert.equal(await dispatches(), 2)
     // The owner settles the unconfirmed action from the recovery panel: recorded as a statement, listed no more, never executed again.
     await waitFor(async () => await evaluate(instance.client, '!!document.querySelector(".action-recovery [data-recovery-state=UNKNOWN_EFFECT] [data-recovery=not-done]")'))
+    // The panel is one closed line until the owner opens it.
+    assert.equal(await evaluate(instance.client, 'document.querySelector(".action-recovery").open'), false)
+    await click(instance.client, '.action-recovery summary')
     await click(instance.client, '.action-recovery [data-recovery-state=UNKNOWN_EFFECT] [data-recovery=not-done]')
     await waitFor(async () => !(await run('window.najdCore.recovery()')).actions.some(item => item.state === 'UNKNOWN_EFFECT'))
     assert.equal((await journal()).find(item => item.state === 'RECONCILED_NOT_DONE') !== undefined, true)

@@ -243,3 +243,14 @@ test('a tool call that arrives only as a streamed output item is read when the c
     { type: 'response.output_item.done', item: { type: 'message', content: [{ type: 'output_text', text: 'Hi' }] } }, { type: 'response.completed', response: { status: 'completed', output: [] } }])) })
   assert.deepEqual(await text.chat({ accessToken: 'token', modelName: 'gpt-5.6-luna', history: [{ role: 'user', text: 'hello' }] }), { kind: 'message', text: 'Hi' })
 })
+
+test('agent calls of one conversation share a prompt cache key; other requests send none', async () => {
+  const bodies = []
+  const done = 'data: ' + JSON.stringify({ type: 'response.output_text.delta', delta: 'Hi' }) + '\n\n' + 'data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [] } }) + '\n\n'
+  const client = createChatGPTInference({ fetchImpl: async (_url, options) => { bodies.push(JSON.parse(options.body)); return new Response(done) } })
+  const turn = cacheKey => ({ accessToken: 'token', modelName: 'gpt-5.6-luna', history: [{ role: 'user', text: 'hello' }], agentTurn: { tools: [], input: [], cacheKey } })
+  await client.chat(turn('867c6e31-474f-496a-91c7-185df3970c8c'))
+  await client.chat(turn('bad key with spaces'))
+  await client.chat({ accessToken: 'token', modelName: 'gpt-5.6-luna', history: [{ role: 'user', text: 'hello' }] })
+  assert.deepEqual(bodies.map(body => body.prompt_cache_key), ['867c6e31-474f-496a-91c7-185df3970c8c', undefined, undefined])
+})

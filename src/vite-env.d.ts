@@ -77,6 +77,17 @@ interface NajdAsset {
   createdAt: string
 }
 
+interface NajdProject {
+  id: string
+  name: string
+  instructions: string
+  files: { id: string; name: string }[]
+  folder: string | null
+  createdAt: string
+  updatedAt: string
+  chats: string[]
+}
+
 interface NajdSessionSummary {
   id: string
   title: string
@@ -264,6 +275,15 @@ interface Window {
     testModel(id: NajdProviderId, model: string): Promise<{ verified: boolean }>
     previewReasoning(id: NajdProviderId, model: string, text: string, preference: NajdReasoningPreference): Promise<NajdReasoningPreference | null>
     openConsole(id: NajdProviderId): Promise<void>
+  }
+  najdProjects?: {
+    list(): Promise<NajdProject[]>
+    save(input: { id?: string; name: string; instructions: string }): Promise<NajdProject>
+    remove(id: string): Promise<boolean>
+    assign(chatId: string, projectId: string | null): Promise<string | null>
+    setFiles(id: string, assetIds: string[]): Promise<NajdProject>
+    chooseFolder(id: string): Promise<NajdProject>
+    clearFolder(id: string): Promise<NajdProject>
   }
   najdSessions?: {
     list(): Promise<NajdSessionSummary[]>

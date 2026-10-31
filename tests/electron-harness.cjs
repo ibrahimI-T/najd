@@ -178,6 +178,22 @@ function libraryFixture(body) {
     }
     return new Response('data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output } }) + '\n\n')
   }
+  // Website screenshots (scripts/capture-website-shots.cjs): a natural request that reads real workspace notes and stops
+  // at the approval for writing the summary.
+  if (prompt.includes('Q3 sales') || prompt.includes('الربع الثالث')) {
+    const last = body.input.at(-1)
+    const arabic = prompt.includes('الربع الثالث')
+    const call = (id, name, args) => [{ type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) }]
+    const report = arabic
+      ? ['# ملخص مبيعات الربع الثالث', '', '- الإيرادات: 4.2 مليون ريال (+18%)', '- أفضل منطقة: الرياض', '- الخطوة التالية: توسيع فريق جدة', '']
+      : ['# Q3 sales summary', '', '- Revenue: SAR 4.2M (+18%)', '- Best region: Riyadh', '- Next step: grow the Jeddah team', '']
+    let output
+    if (last.type !== 'function_call_output') output = call('ws-1', 'najd_files_search', { path: '.', query: arabic ? 'مبيعات' : 'sales' })
+    else if (last.call_id === 'ws-1') output = call('ws-2', 'najd_files_read', { path: arabic ? 'مبيعات-الربع-الثالث.md' : 'q3-sales-notes.md', offset: 0, limit: 2000 })
+    else if (last.call_id === 'ws-2') output = call('ws-3', 'najd_files_write', { path: arabic ? 'تقارير/ملخص-الربع-الثالث.md' : 'reports/q3-sales-summary.md', content: report.join(String.fromCharCode(10)) })
+    else output = [{ type: 'message', content: [{ type: 'output_text', text: arabic ? 'تم. كتبت الملخص في تقارير/ملخص-الربع-الثالث.md.' : 'Done. The summary is in reports/q3-sales-summary.md.' }] }]
+    return new Response('data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output } }) + String.fromCharCode(10, 10))
+  }
   // Activity UI showcase (owner request 2026-10-21): several real tools in sequence, then an approval for the file write.
   if (prompt.includes('activity showcase fixture')) {
     const last = body.input.at(-1)
@@ -272,6 +288,8 @@ providerModule.createProviderClient = id => realClient(id, { fetchImpl: async (u
   if (libraryReply) return libraryReply
   const currentInput = body.input.at(-1).content
   if (currentInput.includes('personality proof') && !body.instructions?.includes('PERSONALITY-WARM-FIXTURE')) throw new Error('Selected personality missing from provider instructions')
+  if (currentInput.includes('personality proof') && !body.instructions?.includes('NAJD model guidance (openai;')) throw new Error('Acting model guidance missing from provider instructions')
+  if (currentInput.includes('personality disabled proof') && body.instructions?.includes('NAJD model guidance (')) throw new Error('Disabled model guidance still entered model context')
   if (currentInput.includes('personality disabled proof') && body.instructions?.includes('PERSONALITY-WARM-FIXTURE')) throw new Error('Disabled personality still entered model context')
   if (currentInput.includes('learned preference proof') && !body.instructions?.includes('I prefer concise answers.')) throw new Error('Approved preference missing from selected context')
   if (currentInput.includes('corrected memory proof') && !body.instructions?.includes('I prefer balanced answers.')) throw new Error('Corrected preference missing from selected context')

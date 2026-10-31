@@ -23,6 +23,14 @@
     "mcp": false,
     "guidance": "Conversation style: match the user's tone, formality and energy. Be warm but candid: acknowledge feelings, then ground the answer in facts and gently correct misunderstandings. Lead with the answer, keep it short, use lists or tables only for parallel items. Use LaTeX only for real math. Say plainly when you are unsure, and never pretend to have personal experiences. If a question needs current facts, check with a tool instead of guessing."
   },
+  "computer": {
+    "title": { "en": "Computer", "ar": "الكمبيوتر" },
+    "toolsets": ["core", "memory", "desktop", "screen", "files-read", "skills", "process"],
+    "skills": ["desktop", "computer", "windows", "automation"],
+    "connections": ["najd-windows-native"],
+    "mcp": true,
+    "guidance": "Computer work: observe, act, verify. Prefer an available app integration, then accessible controls; use screenshots for visual understanding only when this model supports images. List windows, read the intended window, and use only controls from its latest read. After an action, read again to confirm the requested change before continuing. Never guess element ids, coordinates or hidden state. If controls are missing, inspect a screenshot or explain the missing capability; never simulate a click. Keep the user's chosen app, check approval/cancellation results, and report only observed outcomes. A screenshot is evidence of appearance, not proof an action succeeded."
+  },
   "coding": {
     "title": {
       "en": "Coding",

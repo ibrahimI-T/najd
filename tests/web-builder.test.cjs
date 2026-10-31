@@ -18,7 +18,7 @@ test('making a website chooses coding with previews; browsing a site does not', 
   for (const text of ['افتح موقع البنك', 'open the website of my school']) assert.ok(!selectProfile({ text }).extra.includes('webpreview'), text)
 })
 
-test('a vision model gets najd_web_preview and sees the picture; other models are not offered it', async () => {
+test('every model gets najd_web_preview; only a vision model sees the picture, others get its text (owner live test 2026-10-31)', async () => {
   const captures = []
   const webPreview = { capture: async (args) => { captures.push(args); return { status: 'captured', url: 'http://localhost:5173/', width: args.width, imageUrl: 'data:image/jpeg;base64,AAAA', consoleErrors: [] } } }
   for (const vision of [true, false]) {
@@ -28,16 +28,16 @@ test('a vision model gets najd_web_preview and sees the picture; other models ar
       respond: async request => {
         if (turn === 0) offered = request.tools.map(tool => tool.name)
         last = request.input
-        return turn++ === 0 && vision ? call('najd_web_preview', { target: 'http://localhost:5173/', width: 390, fullPage: true }, 'p1') : { kind: 'message', text: 'done' }
+        return turn++ === 0 ? call('najd_web_preview', { target: 'http://localhost:5173/', width: 390, fullPage: true, steps: '' }, 'p1') : { kind: 'message', text: 'done' }
       } })
-    assert.equal(offered.includes('najd_web_preview'), vision)
-    if (vision) {
-      const result = JSON.parse(last.find(item => item.type === 'function_call_output').output)
-      assert.equal(result.imageUrl, undefined, 'the picture is not sent as text')
-      assert.ok(last.some(item => Array.isArray(item.content) && item.content.some(part => part.type === 'input_image' && part.image_url === 'data:image/jpeg;base64,AAAA')))
-    }
+    assert.equal(offered.includes('najd_web_preview'), true)
+    const result = JSON.parse(last.find(item => item.type === 'function_call_output').output)
+    assert.equal(result.imageUrl, undefined, 'the picture is not sent as text')
+    const sawImage = last.some(item => Array.isArray(item.content) && item.content.some(part => part.type === 'input_image' && part.image_url === 'data:image/jpeg;base64,AAAA'))
+    assert.equal(sawImage, vision)
+    if (!vision) assert.match(result.note, /cannot see the picture/)
   }
-  assert.deepEqual(captures, [{ target: 'http://localhost:5173/', width: 390, fullPage: true }])
+  assert.deepEqual(captures, [0, 1].map(() => ({ target: 'http://localhost:5173/', width: 390, fullPage: true, steps: '' })))
 })
 
 test('the preview refuses other schemes, non-public addresses and files outside the allowed folders', async () => {

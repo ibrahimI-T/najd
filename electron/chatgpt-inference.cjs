@@ -98,6 +98,8 @@ function createChatGPTInference({ fetchImpl = fetch, apiBase = API, catalog = 's
           ...(maxTokens ? { max_output_tokens: maxTokens } : {}),
           ...(tool ? { tools: [{ type: 'function', ...tool, strict: true }], tool_choice: { type: 'function', name: tool.name }, parallel_tool_calls: false } : {}),
           ...(agentTurn ? { tools: agentTurn.tools, parallel_tool_calls: false, include: ['reasoning.encrypted_content'] } : {}),
+          // The same key for every call of a conversation lets the service reuse its cached prompt prefix (it reported no cached tokens without it).
+          ...(typeof agentTurn?.cacheKey === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(agentTurn.cacheKey) ? { prompt_cache_key: agentTurn.cacheKey } : {}),
           input: [...history.map(({ role, text }) => ({ role, content: text })), ...(agentTurn?.input || [])],
           ...(reasoningEffort ? { reasoning: { effort: reasoningEffort, ...(catalog === 'subscription' ? { summary: 'auto' } : {}) } } : {}) })
       })

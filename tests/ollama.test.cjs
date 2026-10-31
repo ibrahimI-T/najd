@@ -124,3 +124,17 @@ test('times out a stalled local model request', async t => {
   const client = createOllamaClient({ baseUrl, timeoutMs: 30 })
   await assert.rejects(client.chat({ modelName: 'test', history: [{ role: 'user', text: 'hi' }] }), { code: 'PROVIDER_TIMEOUT' })
 })
+
+test('an agent answer cut at the output limit is kept and marked; a cut tool call still fails', async t => {
+  let payload = { done: true, done_reason: 'length', message: { content: 'Python 3.15.2 was released on' } }
+  const baseUrl = await localServer(t, (request, response) => {
+    response.setHeader('Content-Type', 'application/json')
+    response.end(JSON.stringify(request.url === '/api/show' ? { capabilities: ['completion', 'tools'] } : payload))
+  })
+  const client = createOllamaClient({ baseUrl })
+  const turn = { modelName: 'qwen3:4b', history: [{ role: 'user', text: 'latest python' }], agentTurn: { tools: [], input: [] } }
+  const answer = await client.chat(turn)
+  assert.equal(answer.kind, 'message'); assert.equal(answer.text, 'Python 3.15.2 was released on\n\n[…]')
+  payload = { done: true, done_reason: 'length', message: { content: '', tool_calls: [{ function: { name: 'najd_web_search', arguments: { query: 'py' } } }] } }
+  await assert.rejects(client.chat(turn), { code: 'INVALID_MODEL_OUTPUT' })
+})

@@ -7,7 +7,7 @@ const originalSpawn = processes.spawn
 let ownedChild
 processes.spawn = (...args) => {
   const child = originalSpawn(...args)
-  if (args[1]?.[0]?.endsWith('openclaw-launcher.cjs')) ownedChild = child
+  if (path.basename(args[1]?.[0] || '') === 'najd-gateway-launcher.cjs') ownedChild = child
   return child
 }
 const { createOpenClawGateway } = require('../electron/openclaw-gateway.cjs')
@@ -27,6 +27,7 @@ async function main() {
     assert.equal(config.gateway.bind, 'loopback')
     assert.deepEqual(config.tools.deny, ['*'])
     assert.ok(!JSON.stringify(config).includes('token":"'))
+    assert.ok(ownedChild, 'the managed gateway launcher must be captured before crash recovery is tested')
     const crashed = new Promise(resolve => ownedChild.once('close', resolve))
     ownedChild.kill('SIGKILL')
     await crashed

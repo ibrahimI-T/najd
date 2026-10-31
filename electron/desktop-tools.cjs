@@ -6,7 +6,7 @@
 // (passwords, card numbers, codes) are refused before any approval is asked.
 const { createHash, randomUUID } = require('node:crypto')
 const nodePath = require('node:path')
-const fail = code => Object.assign(new Error(code), { code })
+const fail = (code, hint) => Object.assign(new Error(code), { code }, hint ? { hint } : {})
 const sha = value => createHash('sha256').update(value).digest('hex')
 // Apps NAJD can open by name; settings opens Windows Settings (owner live test 2026-10-19), explorer File Explorer,
 // taskmgr Task Manager and control the Control Panel.
@@ -45,7 +45,7 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
   }
   const finish = async (action, outcome) => { if (action?.id && journal) await journal.finish(action.id, outcome).catch(() => {}) }
 
-  return {
+  const api = {
     available,
     async windows(_args, ctx) {
       const list = await host.invokeHost('najd.desktop.windows', {})
@@ -114,7 +114,10 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
         const list = await host.invokeHost('najd.desktop.windows', {}).catch(() => null)
         const fresh = (Array.isArray(list) ? list : []).filter(item => !before.has(String(item.window)))
         const match = fresh.find(names)
-        if (match) return { status: 'opened', target: opened, verified: true, window: String(match.window), title: String(match.title || '').slice(0, 200) }
+        if (match) {
+          if (!match.titleTooLong) state(keyOf(ctx)).windows.set(String(match.window), match)
+          return { status: 'opened', target: opened, verified: true, window: String(match.window), title: String(match.title || '').slice(0, 200) }
+        }
         other = other || fresh[0] || null
       }
       if (other) return { status: 'opened', target: opened, verified: false, note: 'It was started; a new window appeared ("' + String(other.title || '').slice(0, 120) + '") but it does not name ' + opened + ', so it is not taken as proof. Check with najd_desktop_windows before opening it again.' }
@@ -124,8 +127,15 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
     // approval or a new host read, and element ids stay valid for acting (M2-R8-005).
     async read({ window, from }, ctx) {
       const run = state(keyOf(ctx))
-      const known = run.windows.get(String(window))
-      if (!known) throw fail('NOT_FOUND') // list windows first in this run
+      let known = run.windows.get(String(window))
+      // An id from najd_desktop_open or an earlier list is looked up again in a fresh, read-only list; reading still needs
+      // its approval below (owner live test 2026-10-31: an opened Notepad could not be read).
+      if (!known) {
+        const list = await host.invokeHost('najd.desktop.windows', {}).catch(() => null)
+        for (const item of Array.isArray(list) ? list : []) if (!item.titleTooLong) run.windows.set(String(item.window), item)
+        known = run.windows.get(String(window))
+      }
+      if (!known) throw fail('NOT_FOUND', 'No open window has this id. Call najd_desktop_windows and use a listed window id.')
       const limit = Number.isFinite(ctx?.maxChars) ? Math.max(0, Math.floor(ctx.maxChars)) : 24000
       // Names and values shown to the model are bounded; whatever was cut, here or by the host, is marked, and the rest
       // cannot be read through further parts (M2-R29-001).
@@ -155,7 +165,7 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
       }
       if (Number.isInteger(from) && from > 0) {
         const generation = run.reads.get(String(known.window))
-        if (!generation || from > generation.elements.size) throw fail('NOT_FOUND')
+        if (!generation || from > generation.elements.size) throw fail('NOT_FOUND', 'Read the window again without from.')
         return page(generation, from)
       }
       const grant = `${known.window}@${known.pid}@${known.created}`
@@ -167,7 +177,19 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
         await finish(action, true)
         run.grants.add(grant)
       }
-      const read = await host.invokeHost('najd.desktop.read', { window: String(known.window), pid: known.pid, created: String(known.created), title: known.title }, 20000, { signal: ctx.signal })
+      const readWindow = () => host.invokeHost('najd.desktop.read', { window: String(known.window), pid: known.pid, created: String(known.created), title: known.title }, 20000, { signal: ctx.signal })
+      let read
+      try { read = await readWindow() } catch (failure) {
+        if (failure?.code !== 'STALE_TARGET' || ctx.signal?.aborted) throw failure
+        // A title change (a new tab, a document name) makes the host refuse the old title. Reading is observation, so it is
+        // retried once for the same window handle, process id and creation time; a different process is never followed.
+        const windows = await host.invokeHost('najd.desktop.windows', {})
+        const refreshed = (Array.isArray(windows) ? windows : []).find(item => String(item.window) === String(known.window) && item.pid === known.pid && String(item.created) === String(known.created) && !item.titleTooLong)
+        if (!refreshed || refreshed.title === known.title) throw fail('STALE_TARGET', refreshed ? 'The window is changing; read it again.' : 'The window closed or was replaced. Call najd_desktop_windows.')
+        run.reads.delete(String(window))
+        known = refreshed; run.windows.set(String(window), known)
+        read = await readWindow()
+      }
       const elements = (Array.isArray(read?.elements) ? read.elements : []).map((item, index) => ({ ...item, ref: 'e' + (index + 1) }))
       const generation = { id: randomUUID(), window: known, title: read?.title || known.title, elements: new Map(elements.map(item => [item.ref, item])), complete: read?.complete !== false }
       run.reads.set(String(known.window), generation)
@@ -178,7 +200,7 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
       if (text.length > MAX_TEXT) return { status: 'refused', error: 'TEXT_TOO_LONG', note: 'Type at most ' + MAX_TEXT + ' characters per action so the user can see all of it.' }
       const generation = state(keyOf(ctx)).reads.get(String(window))
       const item = generation?.elements.get(element)
-      if (!item) throw fail('STALE_TARGET') // the element must come from this run's latest read of that window
+      if (!item) throw fail('STALE_TARGET', 'Use an element id from the latest najd_desktop_read of this window.') // the element must come from this run's latest read of that window
       if (action === 'setValue' && item.sensitive) return { status: 'refused', error: 'SENSITIVE_FIELD', note: 'This looks like a password, payment or code field. Ask the user to type it themselves.' }
       // The approval names the control exactly as read. A name longer than the host captures cannot be shown in full,
       // so acting on it is refused rather than approved from a partial label (M2-R20-002).
@@ -196,13 +218,18 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
         const refused = refusedBeforeAction(failure)
         await finish(approved, refused ? 'failed' : false)
         if (failure?.code === 'STALE_TARGET') state(keyOf(ctx)).reads.delete(String(window))
-        throw refused ? fail(REFUSED.has(failure.code) ? failure.code : 'DESKTOP_ACTION_FAILED') : uncertain('DESKTOP_ACTION_FAILED')
+        if (refused) throw fail(REFUSED.has(failure.code) ? failure.code : 'DESKTOP_ACTION_FAILED', failure?.code === 'STALE_TARGET' ? 'Nothing was done: the window changed since it was read. Read it again and use the new element ids.' : undefined)
+        throw uncertain('DESKTOP_ACTION_FAILED')
       }
       // Done only when the host observed the effect (typed value read back, toggle/selection changed, or a visible
       // change after pressing); otherwise the outcome is unverified (M2-R18).
       await finish(approved, result?.verified === true ? true : false)
-      return result?.verified ? { status: 'done', ...result, note: 'Read the window again to see the result.' }
-        : { status: 'unverified', ...result, effectUnknown: true, note: 'The action was sent but no change was seen; it may still have happened. Read the window again before repeating it.' }
+      // The window is observed again right away (same run, already approved for reading), so the model checks the result
+      // without another turn. It is only a read: an action is never repeated here.
+      const after = ctx.signal?.aborted ? null : await api.read({ window }, { ...ctx, maxChars: Math.min(Number.isFinite(ctx?.maxChars) ? ctx.maxChars : 6000, 6000) }).catch(() => null)
+      const observed = after && Array.isArray(after.elements) ? { after } : {}
+      return result?.verified ? { status: 'done', ...result, ...observed, note: observed.after ? 'after is the window read again after the action; use its element ids next.' : 'Read the window again to see the result.' }
+        : { status: 'unverified', ...result, ...observed, effectUnknown: true, note: 'The action was sent but no change was seen; it may still have happened. Check after (or read the window again) before repeating it.' }
     },
     // One window from this run's list, or "" for the primary screen; every capture needs its own approval.
     async capture({ window }, ctx) {
@@ -231,5 +258,6 @@ function createDesktopTools({ host, journal, resolveReadable, available = () => 
     },
     endRun: runKey => runs.delete(runKey)
   }
+  return api
 }
 module.exports = { createDesktopTools }

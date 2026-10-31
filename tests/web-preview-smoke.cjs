@@ -106,6 +106,16 @@ app.whenReady().then(async () => {
     await preview.capture({ target: `http://127.0.0.1:${port}/rtc` })
     await new Promise(resolve => setTimeout(resolve, 3000))
     assert.deepEqual(rtc, { udp: 0, tcp: 0 })
+    // Owner live test 2026-10-31: a static counter page is tested by its buttons, not only rendered.
+    fs.writeFileSync(path.join(root, 'counter.html'), '<!doctype html><title>Counter</title><p>Count: <span id="count">0</span></p><input id="step" value="1">' +
+      '<button id="inc">Increment</button><button onclick="document.getElementById(\'count\').textContent=0">Reset</button><button disabled>Off</button>' +
+      '<script>inc.onclick=()=>{count.textContent=Number(count.textContent)+Number(step.value)}</script>')
+    const counter = await preview.capture({ target: path.join(root, 'counter.html'), width: 390, steps: JSON.stringify([{ click: '#inc' }, { click: 'Increment' }, { expect: '#count', text: '2' },
+      { fill: '#step', text: '5' }, { click: '#inc' }, { read: '#count' }, { click: 'Reset' }, { expect: '#count', text: '0' }, { expect: '#count', text: '9' }, { click: 'Missing' }, { click: 'Off' }]) })
+    assert.deepEqual(counter.steps.map(item => [item.ok, item.value ?? item.error ?? null]), [[true, null], [true, null], [true, '2'], [true, '5'], [true, null], [true, '7'], [true, null], [true, '0'], [false, '0'], [false, 'ELEMENT_NOT_FOUND'], [false, 'ELEMENT_DISABLED']])
+    assert.equal(counter.stepsPassed, false); assert.match(counter.text, /Count: 0/)
+    await assert.rejects(preview.capture({ target: 'https://example.com/', steps: '[{"click":"a"}]' }), { code: 'URL_NOT_ALLOWED' })
+    await assert.rejects(preview.capture({ target: root, steps: 'not json' }), { code: 'INVALID_INPUT' })
     if (out) for (const [name, shot] of [['desktop', desktop], ['phone', phone]]) fs.writeFileSync(path.join(out, `preview-${name}.jpg`), Buffer.from(shot.imageUrl.split(',')[1], 'base64'))
     console.log('PASS: web preview renders files and local servers at desktop and phone widths, reports console errors and sideways scrolling, refuses other schemes,' +
       ` private redirects, outside resources${linked ? ', symlinked index files' : ''}, stops looping pages and cancelled captures, blocks writes, other local services and WebRTC, isolates storage per capture, captures full pages without resizing` + (online ? ', loads public https through pinned connections' : ' (offline: public https not checked)'))

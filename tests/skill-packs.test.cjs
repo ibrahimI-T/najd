@@ -68,7 +68,7 @@ test('the model reads pack files through najd_skills_read and main routes them o
   assert.match(runtime, /\['najd_skills_read', 'skills\.read', [^\]]*\{ id: \{ type: 'string' \}, file: \{ type: 'string' \}/)
   assert.match(runtime, /typeof args\.file === 'string' && args\.file \? args\.file\.slice\(0, 300\) : undefined\); break/)
   const main = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8')
-  assert.match(main, /const guide = await bundledSkills\.read\(id, offset, limit\)\r?\n\s+if \(!skillPacks\.has\(id\)\) \{ if \(file !== undefined\) throw mainError\('NOT_FOUND'\); return guide \}/)
+  assert.match(main, /createSkillSurface\(\{ bundled: bundledSkills, external: externalSkills, packs: skillPacks \}\)/)
 })
 
 test('after an upgrade, a settings file saved before the packs existed still has every pack on, and they cannot be turned off (C85-01)', async t => {

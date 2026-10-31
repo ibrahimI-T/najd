@@ -105,9 +105,37 @@ test('runtime enforces cancellation and tool request budget', async () => {
   controller.abort()
   await assert.rejects(runtime.run({ signal: controller.signal, respond: () => assert.fail('must not request') }), { code: 'CANCELLED' })
   let requests = 0
-  // No small step cap exists: a runaway loop of identical calls is only stopped by a very high safeguard or by the context window.
-  await assert.rejects(runtime.run({ respond: async () => call('najd_capabilities_search', { query: '' }, 'call-' + ++requests) }), error => ['BUDGET_EXCEEDED', 'CONTEXT_LIMIT'].includes(error.code))
+  // Distinct steps keep the high safeguard; identical discovery loops have their own early guard.
+  await assert.rejects(runtime.run({ respond: async () => call('najd_capabilities_search', { query: String(++requests) }, 'call-' + requests) }), error => ['BUDGET_EXCEEDED', 'CONTEXT_LIMIT'].includes(error.code))
   assert.ok(requests > 250, 'the old 250-step cap is gone')
+})
+
+test('identical discovery warns once, permits recovery and bounds model calls', async () => {
+  let searches = 0, turns = 0
+  const runtime = createAgentRuntime({ catalog: { search: async () => { searches++; return [] } }, library })
+  const respond = async request => {
+    if (turns === 3) assert.match(request.input.at(-1).output, /DISCOVERY_LOOP/)
+    return call('najd_capabilities_search', { query: 'office' }, 'loop-' + ++turns)
+  }
+  await assert.rejects(runtime.run({ respond }), { code: 'BUDGET_EXCEEDED' })
+  assert.equal(turns, 4)
+  assert.equal(searches, 2)
+  turns = 0
+  const recovered = await runtime.run({ respond: async request => {
+    if (turns++ < 3) return call('najd_capabilities_search', { query: 'office' }, 'recover-' + turns)
+    assert.match(request.input.at(-1).output, /DISCOVERY_LOOP/)
+    return { kind: 'message', text: 'No matching capability found.' }
+  } })
+  assert.equal(recovered.text, 'No matching capability found.')
+})
+
+test('changed discovery requests reset consecutive repetition count', async () => {
+  let turns = 0, searches = 0
+  const runtime = createAgentRuntime({ catalog: { search: async () => { searches++; return [] } }, library })
+  await runtime.run({ respond: async () => turns < 8
+    ? call('najd_capabilities_search', { query: String(Math.floor(turns++ / 2)) }, 'different-' + turns)
+    : { kind: 'message', text: 'done' } })
+  assert.equal(searches, 8)
 })
 
 test('failed reads record failure and return only a stable error code to the model', async () => {

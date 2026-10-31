@@ -73,3 +73,16 @@ test('untrusted catalogs, oversized bodies, authentication errors, and cancelled
   const cancelled = createProviderClient('deepseek-api', { fetchImpl: async () => { controller.abort(); return json({ choices: [{ finish_reason: 'stop', message: { content: 'Late' } }] }) } })
   await assert.rejects(cancelled.chat({ apiKey: 'FAKE', modelName: 'test-model', history, signal: controller.signal }), { code: 'CANCELLED' })
 })
+
+test('an attached picture reaches any OpenAI-compatible model (owner request 2026-10-31)', async () => {
+  let sent
+  const client = createProviderClient('openai-compatible', { baseUrl: 'http://127.0.0.1:9/v1', fetchImpl: async (_url, options) => {
+    sent = JSON.parse(options.body)
+    return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'A cat.' } }] })
+  } })
+  const input = [{ role: 'user', content: [{ type: 'input_text', text: 'NAJD_ATTACHMENT_DATA []' }, { type: 'input_image', image_url: 'data:image/png;base64,QUJD' }] }]
+  const result = await client.chat({ apiKey: 'test-key', modelName: 'my-model', history, agentTurn: { tools: [], input } })
+  assert.equal(result.kind, 'message')
+  const parts = sent.messages.at(-1).content
+  assert.deepEqual(parts[1], { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } })
+})

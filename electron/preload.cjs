@@ -219,6 +219,15 @@ contextBridge.exposeInMainWorld('najdProviderPages', {
   open: page => ipcRenderer.invoke('najd:provider:page', page)
 })
 
+contextBridge.exposeInMainWorld('najdProjects', {
+  list: () => ipcRenderer.invoke('najd:projects:list'),
+  save: input => ipcRenderer.invoke('najd:projects:save', input),
+  remove: id => ipcRenderer.invoke('najd:projects:remove', id),
+  assign: (chatId, projectId) => ipcRenderer.invoke('najd:projects:assign', chatId, projectId),
+  setFiles: (id, assetIds) => ipcRenderer.invoke('najd:projects:setFiles', id, assetIds),
+  chooseFolder: id => ipcRenderer.invoke('najd:projects:chooseFolder', id),
+  clearFolder: id => ipcRenderer.invoke('najd:projects:clearFolder', id)
+})
 contextBridge.exposeInMainWorld('najdSessions', {
   list: () => ipcRenderer.invoke('najd:session:list'),
   search: query => ipcRenderer.invoke('najd:session:search', query),

@@ -201,7 +201,7 @@ async function main() {
     for (let attempt = 0; child && !exited && attempt < 50; attempt++) await pause(100)
     if (child) assert.equal(exited, true, 'Owned server did not exit')
     if (!stateRoot.startsWith(runtimeRoot + path.sep) || !path.basename(stateRoot).startsWith('ollama-proof-')) throw new Error('Unsafe proof cleanup root')
-    await fs.rm(stateRoot, { recursive: true, force: true })
+    await fs.rm(stateRoot, { recursive: true, force: true, maxRetries: 6, retryDelay: 250 })
   }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1 })
