@@ -14,7 +14,8 @@ const GATES = {
   notices: ['run', 'notices'],
   audit: ['audit', '--omit=dev', '--audit-level=high'],
   desktop: ['run', 'smoke:desktop'],
-  ux: ['run', 'smoke:ux'],
+  // The interface in Arabic and English at five widths without overflow, on the Vue renderer (smoke:ux targets the removed React screens).
+  workstation: ['run', 'smoke:workstation'],
   prepare: ['run', 'smoke:prepare'],
   package: ['run', 'smoke:package']
 }

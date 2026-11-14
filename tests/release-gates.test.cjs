@@ -31,7 +31,7 @@ test('missing, failed, stale, mismatched or dirty evidence is refused with a rea
 })
 
 test('every gate the release depends on is required', () => {
-  assert.deepEqual(Object.keys(GATES).sort(), ['audit', 'build', 'desktop', 'notices', 'package', 'prepare', 'tests', 'ux'])
+  assert.deepEqual(Object.keys(GATES).sort(), ['audit', 'build', 'desktop', 'notices', 'package', 'prepare', 'tests', 'workstation'])
 })
 test('a clean tree has no untracked files and no ignored files inside packaged folders (C78-01)', t => {
   const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { execFileSync } = require('node:child_process')
