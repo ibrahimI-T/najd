@@ -244,7 +244,10 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
   const boundReport = page => {
     if (!page || typeof page !== 'object') return page
     const cutString = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : value
-    return { ...page, url: cutString(page.url, 500), title: cutString(page.title, 200), text: cutString(page.text, 12000),
+    // The whole page text the extension reads (up to 100,000 characters) is kept: the browser tool hands it to the model in windows of
+    // 12,000 (read with an offset, find, skim). Cutting it here at 12,000 meant find and later windows never saw the rest of a long page
+    // (daily use 2026-11-15: "Turing" occurs 11 times in the Arabic Wikipedia article on AI, and find reported no match).
+    return { ...page, url: cutString(page.url, 500), title: cutString(page.title, 200), text: cutString(page.text, 100000),
       elements: Array.isArray(page.elements) ? page.elements.map(item => item && typeof item === 'object' ? { ...item, label: cutString(item.label, 100), target: cutString(item.target, 2000), ...(item.longTarget === true || (typeof item.target === 'string' && item.target.length > 2000) ? { longTarget: true } : {}), href: cutString(item.href, 200),
         ...(Array.isArray(item.optionPairs) ? { optionPairs: item.optionPairs.slice(0, 200).map(pair => Array.isArray(pair) ? [cutString(pair[0], 120), cutString(pair[1], 120), pair[2] === true] : pair) } : {}), form: cutString(item.form, 4000), formAction: cutString(item.formAction, 2000),
         ...(item.formIncomplete === true || (typeof item.form === 'string' && item.form.length > 4000) || (typeof item.formAction === 'string' && item.formAction.length > 2000) ? { formIncomplete: true } : {}),

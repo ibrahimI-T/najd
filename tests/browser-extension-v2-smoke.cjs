@@ -18,7 +18,9 @@ const site = {
   '/echo.json': '{"form": {"custname": "NAJD Test"}}',
   '/echo.txt': 'plain text reply: custname=NAJD Test',
   '/popup': '<!doctype html><title>Popup links</title><a href="/first" target="_blank">Open in a new tab</a>',
-  '/owner': '<!doctype html><title>Owner page</title><p>Opened by the owner</p><a href="/first">Go</a>'
+  '/owner': '<!doctype html><title>Owner page</title><p>Opened by the owner</p><a href="/first">Go</a>',
+  // A long article: the word to find sits far past the first 12,000 characters.
+  '/long': '<!doctype html><title>Long article</title>' + '<p>' + 'Filler sentence about the city and its streets. '.repeat(1000) + '</p><p>The NEEDLEWORD paragraph is here, far down the page.</p>' + '<p>' + 'More filler after the word. '.repeat(200) + '</p>'
 }
 
 async function main() {
@@ -118,6 +120,13 @@ async function main() {
     assert.match(afterPost.text, /custname/, 'the reply of a form POST reads as text: ' + JSON.stringify(afterPost.text))
     const readAgain = await bridge.command('read', {}, { timeoutMs: 15000 })
     assert.match(readAgain.text, /NAJD Test/, 'and a later read of it: ' + JSON.stringify(readAgain.text))
+    // A long page through the real bridge: find sees past the first 12,000 characters and read continues from the match
+    // (daily use 2026-11-15: the bridge cut every page to 12,000 characters, so a word further down was never found).
+    await tools.run({ action: 'open', target: base + '/long', text: '', submit: false }, {})
+    const found = await tools.run({ action: 'find', target: '', text: 'NEEDLEWORD', submit: false }, {})
+    assert.ok(found.count === 1 && found.matches[0].offset > 40000 && found.textLength > 50000, 'find reaches far down a long page: ' + JSON.stringify({ count: found.count, textLength: found.textLength, offset: found.matches?.[0]?.offset }))
+    const continued = await tools.run({ action: 'read', target: 'offset:' + (found.matches[0].offset - 50), text: '', submit: false }, {})
+    assert.match(continued.page.text, /NEEDLEWORD paragraph/, 'read continues from the match')
     // A link that opens a new tab (target=_blank) is followed in NAJD's own tab and leaves no extra tab behind (it used to open one per press).
     const tabsBefore = (await bridge.command('list_tabs', {}, { timeoutMs: 15000 })).tabs.length
     const popup = await bridge.command('open', { url: base + '/popup' }, { timeoutMs: 45000 })

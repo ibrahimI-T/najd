@@ -421,13 +421,13 @@ test('R064-REV-502: masking happens before the length limits, so a password at a
   await call(port, '/v2/hello', { secret })
   const opened = bridge.command('open', { url: 'https://example.com/' })
   const first = await (await call(port, '/v2/command/next', { secret })).json()
-  // The page text carries the password across the 12,000-character limit; the extension sends a little more than the limit.
-  const text = 'x'.repeat(11994) + password + 'y'.repeat(500)
+  // The page text carries the password across the 100,000-character limit; the extension sends a little more than the limit.
+  const text = 'x'.repeat(99994) + password + 'y'.repeat(500)
   await call(port, '/v2/command/result', { secret, method: 'POST', body: { id: first.id, ok: true, result: {}, page: { url: 'https://example.com/', title: 't'.repeat(195) + password, text, elements: [{ id: 'e1', role: 'button', label: 'b'.repeat(95) + password }] } } })
   await opened
   const page = bridge.lastPage()
   assert.ok(!page.text.includes('Boundary'), 'no part of the password is left at the end of the text')
-  assert.ok(page.text.length <= 12000 && page.title.length <= 200 && page.elements[0].label.length <= 100)
+  assert.ok(page.text.length <= 100000 && page.text.length > 99000 && page.title.length <= 200 && page.elements[0].label.length <= 100, 'a long page is kept whole up to 100,000 characters')
   assert.ok(!JSON.stringify(page).includes('Boundary'))
   // The same for a question from the browser.
   const received = []
