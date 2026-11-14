@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/ibrahimI-T/najd/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/ibrahimI-T/najd?label=version&style=for-the-badge&color=2f8cff&labelColor=1b1b1b"></a>
+  <img alt="Beta" src="https://img.shields.io/badge/status-beta-f0a020?style=for-the-badge&labelColor=1b1b1b">
   <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-3fb950?style=for-the-badge&labelColor=1b1b1b"></a>
   <a href="https://discord.gg/QAbYVEdcE"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=1b1b1b"></a>
   <a href="https://najdagent.si"><img alt="Website" src="https://img.shields.io/badge/website-najdagent.si-2f8cff?style=for-the-badge&labelColor=1b1b1b"></a>
@@ -61,6 +62,8 @@ It speaks Arabic and English, uses the model you choose, and finishes real tasks
 </p>
 
 ## Install
+
+> **NAJD is in beta.** It is still being developed, so you may run into bugs. Please report them on [Discord](https://discord.gg/QAbYVEdcE) or in an issue.
 
 1. Download `NAJD-AGENT-Setup.exe` from the [latest release](https://github.com/ibrahimI-T/najd/releases/latest) (Windows 10 or 11, 64-bit).
 2. Run it and follow the steps. Windows may show an unknown-publisher notice until the installer carries a publisher certificate.
