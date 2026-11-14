@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>NAJD CONTROL</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+html,body{margin:0;height:100%;background:transparent;overflow:hidden;font:600 13px system-ui,'Segoe UI',sans-serif}
+#frame{position:fixed;inset:0;border:3px solid #1a88ff;box-shadow:inset 0 0 28px 6px rgba(26,136,255,.55),0 0 0 1px rgba(26,136,255,.6);animation:glow 1.6s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:inset 0 0 44px 12px rgba(26,136,255,.75),0 0 0 1px rgba(26,136,255,.9)}}
+#badge{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:7px 14px;border-radius:999px;background:rgba(18,18,18,.92);color:#fff;border:1px solid rgba(26,136,255,.8);letter-spacing:.08em}
+#dot{width:9px;height:9px;border-radius:50%;background:#16c456;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+#caption{font-weight:400;letter-spacing:0;color:#cfd8e3;max-width:50vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ring{position:fixed;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;border:5px solid #ffb020;background:rgba(255,176,32,.18);box-shadow:0 0 0 3px rgba(0,0,0,.55),0 0 26px 8px rgba(255,176,32,.85);pointer-events:none;animation:ring 1.8s ease-out forwards}
+.ring.end{border-color:#16c456;background:rgba(22,196,86,.18);box-shadow:0 0 0 3px rgba(0,0,0,.55),0 0 26px 8px rgba(22,196,86,.85)}
+@keyframes ring{0%{transform:scale(.3);opacity:1}25%{transform:scale(1);opacity:1}75%{opacity:1}100%{transform:scale(1.35);opacity:0}}
+@media (prefers-reduced-motion:reduce){#frame,#dot{animation:none}.ring{animation:none;opacity:.9}}
+</style></head>
+<body><div id="frame"></div><div id="badge"><span id="dot"></span>NAJD CONTROL<span id="caption"></span></div>
+<script>window.setCaption=text=>{document.getElementById('caption').textContent=text?'· '+text:''}
+// A ring where NAJD just clicked, typed, scrolled or dragged (x, y in this display's own coordinates); it fades by itself.
+window.ring=(x,y,end)=>{const r=document.createElement('div');r.className='ring'+(end?' end':'');r.style.left=x+'px';r.style.top=y+'px';document.body.appendChild(r);setTimeout(()=>r.remove(),2000)}</script>
+</body></html>

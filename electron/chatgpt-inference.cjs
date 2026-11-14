@@ -92,7 +92,11 @@ function createChatGPTInference({ fetchImpl = fetch, apiBase = API, catalog = 's
     try {
       const response = await fetchImpl(`${apiBase}/responses`, {
         method: 'POST', redirect: 'error', signal: combined,
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        // ChatGPT derives prompt-cache affinity from the session_id header, not only from prompt_cache_key (openai/codex
+        // codex-rs/core/src/client.rs, responses_session_id). Without it every call of a 34k-token desktop task reported 0 cached
+        // tokens (owner run 2026-11-09). The value is the same per-conversation key as prompt_cache_key.
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'text/event-stream',
+          ...(typeof agentTurn?.cacheKey === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(agentTurn.cacheKey) ? { session_id: agentTurn.cacheKey } : {}) },
         body: JSON.stringify({ model: modelName, store: false, stream: true,
           ...(systemPrompt === undefined ? {} : { instructions: systemPrompt }),
           ...(maxTokens ? { max_output_tokens: maxTokens } : {}),

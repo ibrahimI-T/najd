@@ -148,6 +148,18 @@ function createSessionStore(filePath) {
     })
   }
 
+  // Rename (owner request 2026-11-10): the owner's own title, 1 to 60 characters, no control characters; the order stays as it was.
+  async function renameSession(id, title) {
+    const clean = typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : ''
+    if (!validId(id) || !clean || clean.length > 60 || /[\x00-\x1f]/.test(clean)) throw storeError('INVALID_INPUT')
+    return mutate(next => {
+      const session = next.sessions.find(item => item.id === id)
+      if (!session) throw storeError('NOT_FOUND')
+      session.title = clean
+      return { id: session.id, title: session.title }
+    })
+  }
+
   async function deleteSession(id) {
     if (!validId(id)) throw storeError('INVALID_INPUT')
     return mutate(next => {
@@ -158,7 +170,7 @@ function createSessionStore(filePath) {
     })
   }
 
-  return { listSessions, searchSessions, getSession, createSession, appendMessage, deleteSession }
+  return { listSessions, searchSessions, getSession, createSession, appendMessage, renameSession, deleteSession }
 }
 
 module.exports = { createSessionStore }

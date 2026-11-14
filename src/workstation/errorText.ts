@@ -1,0 +1,24 @@
+// Owner-facing text for task error codes, shared by both renderers.
+const ERRORS: Record<string, [string, string]> = {
+  HISTORY: ['تعذر الوصول إلى السجل المحفوظ.', 'The saved history could not be reached.'], CANCELLED: ['أوقفت المهمة.', 'The task was stopped.'], ERROR: ['لم تكتمل المهمة.', 'The task did not finish.'],
+  UNKNOWN_EFFECT: ['نتيجة خطوة غير مؤكدة. تحقق قبل طلبها مرة أخرى.', 'A step has an unconfirmed result. Check before requesting it again.'], MODEL_NOT_CONFIGURED: ['اختر نموذجًا من الإعدادات أولًا.', 'Choose a model in Settings first.'],
+  OLLAMA_UNAVAILABLE: ['النموذج المحلي غير متصل.', 'The local model is not reachable.'], MODEL_NOT_FOUND: ['النموذج المختار غير موجود.', 'The selected model was not found.'], PROVIDER_TIMEOUT: ['انتهت مهلة المزود.', 'The provider timed out.'],
+  AUTH_REQUIRED: ['يلزم تسجيل الدخول لدى المزود.', 'Sign in to the provider.'], CREDENTIAL_UNAVAILABLE: ['تعذر قراءة بيانات الدخول المحفوظة.', 'The saved credential could not be read.'], PROVIDER_RATE_LIMIT: ['بلغت حد الاستخدام لدى المزود.', 'The provider usage limit was reached.'],
+  PROVIDER_REJECTED: ['رفض المزود الطلب.', 'The provider rejected the request.'],
+  CONTEXT_LIMIT: ['الطلب أكبر من نافذة سياق النموذج. أعد المحاولة وسيرسل نجد طلبًا يناسبها، أو ابدأ محادثة جديدة.', 'The request is larger than the model\'s context window. Try again and NAJD will send one that fits, or start a new chat.'], TOOLS_NOT_SUPPORTED: ['هذا النموذج لا يدعم الأدوات.', 'This model does not support tools.'], ATTACHMENT_PROVIDER: ['النموذج المختار رفض المرفق.', 'The selected model refused the attachment.'],
+  CONVERSATION_BUSY: ['لم تُحذف المحادثة: فيها مهمة قيد التنفيذ.', 'Not deleted: the conversation has a running task.'], PROCESSES_RUNNING: ['لم تُحذف المحادثة: أوامر الخلفية لم تتوقف بعد.', 'Not deleted: background commands have not stopped.'],
+  NO_ROOTS: ['لا توجد مجلدات مسموحة بعد. أضفها في الصلاحيات.', 'No folders are allowed yet. Add them in Permissions.'], RUNTIME_UNAVAILABLE: ['النواة غير متاحة.', 'The core is not available.'],
+  EXPORTED: ['صُدّرت المحادثة إلى ملف نصي.', 'The conversation was exported to a text file.'], EXPORTED_PDF: ['صُدّرت المحادثة إلى ملف PDF.', 'The conversation was exported to a PDF file.'], EXPORTED_MD: ['صُدّرت المحادثة إلى ملف Markdown.', 'The conversation was exported to a Markdown file.'], EXPORT_EXISTS: ['لم تُصدَّر: يوجد ملف بهذا الاسم، اختر اسمًا آخر.', 'Not exported: a file with that name exists; choose another name.'], EXPORT_FAILED: ['تعذر تصدير المحادثة.', 'The conversation could not be exported.']
+}
+const ACTIONS: Record<string, [string, string]> = {
+  INVALID_INPUT: ['المدخل أو الملف غير صالح لهذا الإجراء.', 'The input or file is not valid for this action.'], NOT_FOUND: ['العنصر غير موجود؛ ربما حُذف.', 'The item was not found; it may have been removed.'],
+  PERMISSION_DENIED: ['لم يُسمح بهذا الإجراء.', 'This action was not allowed.'], MEMORY_STORE_UNAVAILABLE: ['تعذر الوصول إلى ملف الذاكرة.', 'The memory file could not be reached.'],
+  INVALID_TOKEN: ['رمز البوت غير صالح.', 'The bot token is not valid.'], NETWORK: ['تعذر الاتصال بالخدمة. تحقق من الإنترنت.', 'The service could not be reached. Check the connection.'],
+  REMOTE_DISABLED: ['فعّل التحكم عن بعد أولًا.', 'Turn on remote control first.'], UPDATE_UNAVAILABLE: ['التحديث غير متاح الآن.', 'No update is available now.'], UPDATE_BUSY: ['نجد مشغول بمهمة؛ حدّث بعد انتهائها.', 'NAJD is busy with a task; update after it ends.'],
+  OAUTH_PKCE_UNSUPPORTED: ['هذه الخدمة لا تدعم تسجيل الدخول الآمن (PKCE)؛ استخدم رمز وصول بدلًا منه.', 'This service does not support secure sign-in (PKCE); use an access token instead.'], OAUTH_NOT_SUPPORTED: ['هذا الخادم لا يعلن تسجيل دخول OAuth؛ استخدم رمز وصول.', 'This server does not offer OAuth sign-in; use an access token.'],
+  OAUTH_TIMEOUT: ['انتهت مهلة تسجيل الدخول في المتصفح.', 'The sign-in in the browser timed out.'], OAUTH_DENIED: ['رُفض تسجيل الدخول في صفحة الخدمة.', 'The sign-in was declined on the service page.'], OAUTH_STATE_MISMATCH: ['رُفض رد تسجيل دخول غير مطابق.', 'A mismatched sign-in reply was refused.'],
+  GATEWAY_STARTING: ['المحرك قيد التشغيل؛ انتظر قليلًا.', 'The engine is starting; wait a moment.'], FOLDER_OPEN_FAILED: ['تعذر فتح المجلد.', 'The folder could not be opened.']
+}
+// The text for a code an action ended with: an action code, a task code, or the code itself in parentheses after a general sentence.
+export const actionText = (code: string, lang: 'ar' | 'en') => { const key = /^[A-Z_]{3,}/.exec(code)?.[0] || ''; const entry = ACTIONS[key] || ERRORS[key]; return entry ? entry[lang === 'ar' ? 0 : 1] : code }
+export const errorText = (code: string, lang: 'ar' | 'en') => { const entry = ERRORS[code]; return entry ? entry[lang === 'ar' ? 0 : 1] : (lang === 'ar' ? 'لم تكتمل المهمة' : 'The task did not finish') + ` (${code})` }

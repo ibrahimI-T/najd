@@ -4,11 +4,31 @@ const { readTool, parseReadProposal } = require('./model-file-tool.cjs')
 const { outputTokenLimit } = require('./provider-http.cjs')
 const { chatTools, chatMessages, agentResult } = require('./chat-tools.cjs')
 const { fromOllama } = require('./usage.cjs')
+const { textTurn, textTurnMessages } = require('./text-tools.cjs')
 const { agentTurnSize } = require('./agent-context.cjs')
 // Pictures count as a fixed cost (each bounded in size and number), not by their base64 length (M2-R10-002).
 const agentTurnSizeSafe = turn => { try { return agentTurnSize(turn) } catch { return Infinity } }
 
 function providerError(code) { return Object.assign(new Error(code), { code }) }
+
+// The context window NAJD runs an Ollama model with (owner request 2026-11-09: never assume 16K). NAJD sends num_ctx with every
+// request, so the window used is the one chosen here, from what Ollama itself reports, in this order: the model's Modelfile
+// (PARAMETER num_ctx), the server setting OLLAMA_CONTEXT_LENGTH, then the model's own maximum (model_info *.context_length) up to
+// DEFAULT_CAP so a large model does not take all the memory. Only when Ollama says nothing is a conservative FALLBACK used, marked
+// as estimated. Re-read after REFRESH_MS, so a changed Modelfile or setting is picked up.
+const DEFAULT_CAP = 32768, FALLBACK = 8192, MIN_WINDOW = 2048, REFRESH_MS = 60000
+function chooseWindow({ details, env = process.env }) {
+  const info = details?.model_info && typeof details.model_info === 'object' ? details.model_info : {}
+  const maxKey = Object.keys(info).find(key => /\.context_length$/.test(key))
+  const modelMax = Number.isInteger(info[maxKey]) && info[maxKey] >= MIN_WINDOW ? info[maxKey] : null
+  const fromModelfile = Number((/(?:^|\n)\s*num_ctx\s+(\d+)/.exec(String(details?.parameters || '')) || [])[1])
+  const fromServer = Number(env.OLLAMA_CONTEXT_LENGTH)
+  const cap = value => modelMax ? Math.min(value, modelMax) : value
+  if (Number.isInteger(fromModelfile) && fromModelfile >= MIN_WINDOW) return { window: cap(fromModelfile), source: 'modelfile', estimated: false, modelMax }
+  if (Number.isInteger(fromServer) && fromServer >= MIN_WINDOW) return { window: cap(fromServer), source: 'server-setting', estimated: false, modelMax }
+  if (modelMax) return { window: Math.min(modelMax, DEFAULT_CAP), source: 'model', estimated: false, modelMax }
+  return { window: FALLBACK, source: 'fallback', estimated: true, modelMax: null }
+}
 
 // A local model may need a long time on a slow computer; the hour is only a safety net (owner decision 2026-10-24).
 function createOllamaClient({ baseUrl = 'http://127.0.0.1:11434', timeoutMs = 3600000 } = {}) {
@@ -52,11 +72,37 @@ function createOllamaClient({ baseUrl = 'http://127.0.0.1:11434', timeoutMs = 36
     return result.models.map(model => model?.name).filter(name => typeof name === 'string' && modelNamePattern.test(name))
   }
 
+  const windows = new Map() // model -> { at, value }
+  async function contextWindow(modelName, signal) {
+    if (typeof modelName !== 'string' || !modelNamePattern.test(modelName)) throw providerError('INVALID_INPUT')
+    const cached = windows.get(modelName)
+    if (cached && Date.now() - cached.at < REFRESH_MS) return cached.value
+    let value
+    try { value = chooseWindow({ details: await request('/api/show', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelName }) }, signal) }) }
+    catch { value = { window: FALLBACK, source: 'fallback', estimated: true, modelMax: null } }
+    windows.set(modelName, { at: Date.now(), value })
+    return value
+  }
+
   // Model capabilities reported by Ollama itself (e.g. "completion", "tools", "vision").
   async function capabilities(modelName, signal) {
     if (typeof modelName !== 'string' || !modelNamePattern.test(modelName)) throw providerError('INVALID_INPUT')
     const details = await request('/api/show', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelName }) }, signal)
     return Array.isArray(details?.capabilities) ? details.capabilities.filter(item => typeof item === 'string').slice(0, 20) : []
+  }
+
+  // The agent turn of a model without native tool calling: tools in the prompt, the call parsed and validated from the reply
+  // (text-tools.cjs textTurn: an invalid call goes back with the reason and never runs; the usage of every attempt is counted).
+  async function textAgentTurn({ modelName, history, signal, maxOutputTokens, systemPrompt, agentTurn, vision }) {
+    const messages = textTurnMessages(chatMessages({ systemPrompt, history, input: agentTurn.input, dialect: 'ollama', vision }), agentTurn.tools)
+    const options = { ...(outputTokenLimit(maxOutputTokens) ? { num_predict: outputTokenLimit(maxOutputTokens) } : {}), num_ctx: (await contextWindow(modelName, signal)).window }
+    const { message, usage } = await textTurn({ messages, tools: agentTurn.tools, send: async list => {
+      const result = await request('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName, stream: false, truncate: false, shift: false, options, messages: list }) }, signal)
+      if (result?.done !== true || result.done_reason && !['stop', 'length'].includes(result.done_reason)) throw providerError('INVALID_MODEL_OUTPUT')
+      return { message: result.message, usage: fromOllama(result), cut: result.done_reason === 'length' }
+    } })
+    return agentResult(message, usage)
   }
 
   async function chat({ modelName, history, signal, readPath, maxOutputTokens = 0, systemPrompt, agentTurn } = {}) {
@@ -75,11 +121,15 @@ function createOllamaClient({ baseUrl = 'http://127.0.0.1:11434', timeoutMs = 36
       // Local agent turn: the model must declare tool support; pictures need a vision model.
       if (readPath !== undefined || !Array.isArray(agentTurn.input) || agentTurnSizeSafe(agentTurn) > 40000000) throw providerError('INVALID_INPUT')
       const caps = await capabilities(modelName, signal)
-      if (!caps.includes('tools')) throw providerError('TOOLS_NOT_SUPPORTED')
+      // A chat model without native tool calling uses the text protocol (text-tools.cjs), validated before anything runs.
+      if (!caps.includes('tools')) {
+        if (!caps.includes('completion')) throw providerError('TOOLS_NOT_SUPPORTED')
+        return textAgentTurn({ modelName, history, signal, maxOutputTokens, systemPrompt, agentTurn, vision: caps.includes('vision') })
+      }
       const result = await request('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName, stream: false, truncate: false, shift: false,
           // Tool schemas and instructions need more than Ollama's small default context.
-          options: { ...(outputTokenLimit(maxOutputTokens) ? { num_predict: outputTokenLimit(maxOutputTokens) } : {}), num_ctx: 16384 },
+          options: { ...(outputTokenLimit(maxOutputTokens) ? { num_predict: outputTokenLimit(maxOutputTokens) } : {}), num_ctx: (await contextWindow(modelName, signal)).window },
           tools: chatTools(agentTurn.tools),
           messages: chatMessages({ systemPrompt, history, input: agentTurn.input, dialect: 'ollama', vision: caps.includes('vision') }) }) }, signal)
       // An answer cut at the output limit is kept, marked as cut, instead of failing the task; a cut tool call never runs.
@@ -97,7 +147,7 @@ function createOllamaClient({ baseUrl = 'http://127.0.0.1:11434', timeoutMs = 36
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: modelName, stream: false, truncate: false, shift: false,
-        options: { ...(maxTokens ? { num_predict: maxTokens } : {}), ...(tool ? { temperature: 0, seed: 0 } : {}) },
+        options: { ...(maxTokens ? { num_predict: maxTokens } : {}), ...(tool ? { temperature: 0, seed: 0 } : {}), num_ctx: (await contextWindow(modelName, signal)).window },
         ...(tool ? { tools: [{ type: 'function', function: tool }] } : {}),
         messages: [
           ...(systemPrompt === undefined ? [] : [{ role: 'system', content: systemPrompt }]),
@@ -120,7 +170,7 @@ function createOllamaClient({ baseUrl = 'http://127.0.0.1:11434', timeoutMs = 36
     return { kind: 'message', text: text.trim(), ...(usage ? { usage } : {}) }
   }
 
-  return { listModels, chat, capabilities }
+  return { listModels, chat, capabilities, contextWindow }
 }
 
-module.exports = { createOllamaClient }
+module.exports = { createOllamaClient, chooseWindow }

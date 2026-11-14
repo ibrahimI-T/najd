@@ -81,6 +81,19 @@ test('the same failed read is not repeated: the second identical call is answere
   assert.equal(reads, 1)
 })
 
+test('the replacement surface exposes only workstation guides and installed package skills', async t => {
+  const dir = temp(t)
+  const workstationRows = najdGuideRows(path.join(__dirname, '..', 'electron', 'workstation', 'skills'))
+  const bundled = createInstructionSkills({ filePath: path.join(dir, 'instruction-skills.json'), bundle: { version: 1, skills: workstationRows, notices: [] } })
+  const packageRow = { id: 'najd-market-skill', name: 'najd-market-skill', description: 'Installed from the verified market', enabled: true }
+  const skills = createSkillSurface({ bundled, packages: { rows: async () => [packageRow], read: async id => ({ id, offset: 0, text: 'name: ' + id, hasMore: false }) }, legacy: false })
+  const listed = await skills.list()
+  assert.deepEqual(new Set(listed.map(row => row.id)), new Set([...workstationRows.map(row => row.id), packageRow.id]))
+  assert.equal(listed.some(row => upstream.skills.some(old => old.id === row.id)), false)
+  assert.match((await skills.read(packageRow.id, 0, 8000)).text, /najd-market-skill/)
+  assert.match((await skills.read('market skill', 0, 8000)).text, /najd-market-skill/)
+})
+
 test('a procedure saved through the approval flow is listed, read back and reused by its id', async t => {
   const { skills, external } = surface(t)
   const extensions = { saveSkill: async input => { const row = await external.saveLearned(input); return { status: 'saved', skill: { id: row.id, name: row.name } } } }

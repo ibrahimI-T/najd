@@ -700,3 +700,21 @@ test('saving a learned skill always waits for the owner, also with full access',
   for (let n = 0; n < 50 && !decision; n++) await settle()
   assert.equal(decision, 'DENY')
 })
+test('side panel: the page text, its language and one attached text file may travel beside the question, bounded and with no other fields', () => {
+  const core = createNajdCore({ journal: null, model: async () => ({ kind: 'message', text: 'ok' }) })
+  const context = { title: 'خطة', url: 'https://shop.example.com/', selection: '', text: 'ن'.repeat(12000), lang: 'ar', attachment: { name: 'notes.txt', text: 'a'.repeat(20000) } }
+  const request = { text: 'ما السعر؟', intentId: 'panel-1', provider: 'ollama', history: [{ role: 'user', text: 'ما السعر؟' }], browserContext: context }
+  assert.ok(core.startTask(request).id)
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-2', browserContext: { ...context, text: 'x'.repeat(12001) } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-3', browserContext: { ...context, lang: 'ar; drop' } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-4', browserContext: { ...context, attachment: { name: 'a', text: 'b'.repeat(20001) } } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-5', browserContext: { ...context, attachment: { name: 'a', text: 'b', path: 'C:/x' } } }), { code: 'INVALID_INPUT' })
+  // Up to three other tabs named with @, each a web address, a title and at most 6000 characters.
+  const tab = { url: 'https://b.example/', title: 'B', text: 'ب'.repeat(6000) }
+  assert.ok(core.startTask({ ...request, intentId: 'panel-6', browserContext: { ...context, tabs: [tab, tab, tab] } }).id)
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-7', browserContext: { ...context, tabs: [tab, tab, tab, tab] } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-8', browserContext: { ...context, tabs: [{ ...tab, text: 'x'.repeat(6001) }] } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-9', browserContext: { ...context, tabs: [{ ...tab, url: 'file:///C:/x' }] } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-10', browserContext: { ...context, tabs: [{ ...tab, tabId: 4 }] } }), { code: 'INVALID_INPUT' })
+  assert.throws(() => core.startTask({ ...request, intentId: 'panel-11', browserContext: { ...context, tabs: [] } }), { code: 'INVALID_INPUT' })
+})

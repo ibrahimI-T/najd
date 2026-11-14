@@ -1,43 +1,64 @@
-// Plugins from outside in the real desktop app (isolated profile, real GitHub): preview and install the official claude-code-setup plugin from its address, see it listed, its
-// skill enabled and removal undoing it. Needs internet access; without it the run is reported as skipped, never as a pass.
+// Installing a package from a file in the real desktop app (Vue renderer, isolated profile): Plugins > Add new > Choose a file, the install review
+// (name, publisher, permissions), Install, the package and its skill appear in the catalog as installed, Disable and Enable follow, and Remove
+// takes the skill away again. Rewritten for the Vue renderer (docs/OPUS-BLOCKERS.md B-003): the old React "plugins from a GitHub address" flow
+// has no Vue counterpart (R-070: the workstation catalog is the one skill and plugin surface), and this smoke needs no internet. The fixture
+// package is built here with the same integrity rule the app checks. Usage: npm run smoke:plugins
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os')
-const { launch, stop, evaluate, click, waitFor } = require('./electron-ui-smoke.cjs')
+const { zipSync } = require('fflate')
+const { payloadDigest } = require('../electron/workstation/packages.cjs')
+const { launch, stop, evaluate, waitFor } = require('./electron-ui-smoke.cjs')
 
-const URL_ = 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/claude-code-setup'
+const enc = text => new TextEncoder().encode(text)
+function fixturePackage() {
+  const files = { 'skills/smoke-hello/SKILL.md': enc('---\nname: smoke-hello\ndescription: A skill from the plugins smoke fixture.\n---\n# Smoke hello\n\nSay hello.') }
+  const manifest = { schemaVersion: 1, id: 'smoke-pack', displayName: 'Smoke pack', version: '1.0.0', publisher: { name: 'NAJD smoke' }, description: 'A fixture package for the plugins smoke.', categories: ['personal'], skills: ['skills/smoke-hello'], permissions: [], dependencies: [],
+    compatibility: { os: ['win32', 'linux', 'darwin'], arch: ['x64', 'arm64'], minNajd: '0.1.0' }, integrity: { sha256: payloadDigest(files) }, license: { spdx: 'MIT' } }
+  return zipSync({ ...files, 'najd-package.json': enc(JSON.stringify(manifest)) })
+}
+
 async function main() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-desktop-test-'))
   let instance
   try {
+    await fs.mkdir(root + '-imports', { recursive: true })
+    await fs.writeFile(path.join(root + '-imports', 'package-fixture.zip'), fixturePackage())
     instance = await launch(root)
     const client = instance.client
     const run = async expression => { const result = await client.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails)); return result.result.value }
-    const reachable = await run(`fetch('https://codeload.github.com/anthropics/claude-plugins-official/zip/refs/heads/main', { method: 'HEAD' }).then(r => r.ok || r.status < 500).catch(() => false)`)
-    await click(client, '.sidebar-link[aria-label]')
-    await click(client, '.settings-nav-item:nth-child(10)')
-    await waitFor(async () => await evaluate(client, '!!document.querySelector("[data-plugin-installer]")'))
-    const plan = await run(`window.najdPlugins.preview(${JSON.stringify(URL_)}).then(value => ({ ok: true, value }), error => ({ ok: false, code: error.message }))`)
-    if (!plan.ok) { console.log('SKIPPED (no access to GitHub from this computer): ' + plan.code); return }
-    assert.equal(plan.value.id, 'claude-code-setup'); assert.ok(plan.value.skillCount >= 1)
-    const setValue = (selector, value) => run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
-    await setValue('[data-plugin=url]', URL_)
-    await click(client, '[data-plugin=preview]')
-    await waitFor(async () => await evaluate(client, '!!document.querySelector("[data-plugin-plan]")'))
-    await click(client, '[data-plugin=install]')
-    await waitFor(async () => await evaluate(client, '!!document.querySelector("[data-plugin-installed=claude-code-setup]")'), 60000)
-    const skills = await run('window.najdSkills.list()')
-    const skill = skills.find(item => /recommender/i.test(item.name))
-    assert.ok(skill && skill.enabled, 'the plugin skill is installed and enabled')
-    assert.equal((await run('window.najdPlugins.list()')).length, 1)
-    await run('window.najdPlugins.remove("claude-code-setup")')
-    assert.equal((await run('window.najdSkills.list()')).some(item => /recommender/i.test(item.name)), false, 'removal undoes the skills')
-    assert.deepEqual(await run('window.najdPlugins.list()'), [])
-    console.log('PASS: plugin previewed and installed from a GitHub address in the real app, its skill enabled, listed in Plugins, and removed with its skill.' + (reachable ? '' : ' (network probe inconclusive)'))
+    const exists = selector => evaluate(client, `document.querySelector(${JSON.stringify(selector)}) !== null`)
+    const press = async selector => { await waitFor(async () => await exists(selector)); await run(`document.querySelector(${JSON.stringify(selector)}).click()`) }
+    const entry = async () => (await run('window.najdWorkstation.catalog()')).entries.find(item => item.id === 'smoke-pack')
+    await waitFor(async () => await evaluate(client, 'document.querySelector("[data-shell=workstation]")?.dataset.renderer === "vue" && !!document.querySelector("[data-nav=skills-plugins]")'), 60000)
+    await client.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false })
+    assert.equal(await entry(), undefined, 'the package is not installed yet')
+
+    // Plugins > Add new > the first item opens the add dialog > Choose a file (the harness's picker offers the fixture) > the install review.
+    await press('[data-nav="skills-plugins"]')
+    await press('[data-hub="add"]')
+    await run(`document.querySelector('[data-hub="add"]').parentElement.querySelector('[role=menuitem]').click()`)
+    await press('[data-hub="file"]')
+    await waitFor(async () => await exists('[data-hub="install"]'))
+    const review = await evaluate(client, 'document.querySelector(".w-dialog").innerText')
+    assert.ok(review.includes('Smoke pack') && review.includes('NAJD smoke'), 'the review names the package and its publisher: ' + review)
+    await run(`document.querySelector('[data-hub="install"]').click()`)
+    await waitFor(async () => { const found = await entry(); return !!found && found.state !== 'NOT_INSTALLED' }, 30000)
+    const installed = await entry()
+    assert.ok(installed.installedVersion === '1.0.0' || installed.version === '1.0.0', 'installed at 1.0.0: ' + JSON.stringify(installed).slice(0, 300))
+
+    // Disable and enable follow through the API the page uses; Remove takes the package and its skill away.
+    await run(`window.najdWorkstation.setPackageEnabled('smoke-pack', false)`)
+    await waitFor(async () => (await entry())?.state === 'DISABLED')
+    await run(`window.najdWorkstation.setPackageEnabled('smoke-pack', true)`)
+    await waitFor(async () => (await entry())?.state !== 'DISABLED')
+    await run(`window.najdWorkstation.removePackage('smoke-pack')`)
+    await waitFor(async () => { const found = await entry(); return !found || found.state === 'NOT_INSTALLED' })
+    console.log('PASS (Vue): a package from a file is reviewed (name, publisher) and installed from Plugins > Add new > Choose a file, shows in the catalog, can be disabled and enabled, and removing it takes it away again. No internet needed.')
   } finally {
     if (instance) await stop(instance)
     const resolved = path.resolve(root)
     if (!resolved.startsWith(path.resolve(os.tmpdir()) + path.sep) || !path.basename(resolved).startsWith('najd-desktop-test-')) throw Error('Unsafe cleanup')
-    for (const dir of [resolved, resolved + '-documents']) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }).catch(() => {})
+    for (const dir of [resolved, resolved + '-documents', resolved + '-imports']) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }).catch(() => {})
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

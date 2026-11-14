@@ -129,11 +129,12 @@ test('a skill install is approved first and enabled; a denial installs nothing',
   assert.deepEqual(calls.enabled, [['ext-pdf', true]])
 })
 
-test('extension searches are scoped reads, installs need approval, and Arabic install requests load the toolset', () => {
+test('legacy extension operations keep their policy, while skill/plugin requests route to the replacement market', () => {
   assert.equal(decideAction('extensions.search', { kind: 'extensions', validated: true }).decision, 'allow')
   assert.equal(decideAction('extensions.install').decision, 'approval')
-  assert.ok(selectProfile({ text: 'ثبت لي مهارة للـ PDF' }).extra.includes('extensions'))
-  assert.ok(selectProfile({ text: 'install an MCP server for weather' }).extra.includes('extensions'))
+  assert.ok(selectProfile({ text: 'ثبت لي مهارة للـ PDF' }).extra.includes('workstation'))
+  assert.ok(selectProfile({ text: 'find a plugin marketplace' }).extra.includes('workstation'))
+  assert.equal(selectProfile({ text: 'install an MCP server for weather' }).extra.includes('extensions'), false)
 })
 
 test('a remote server without required headers is reached through the pinned mcp-remote bridge', async () => {

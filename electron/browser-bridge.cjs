@@ -17,7 +17,8 @@ const extensionOrigin = /^chrome-extension:\/\/[a-p]{32}$/
 // A link is identified by the extension AND its installation: the same store extension in two browser profiles has the same origin but its own instance id.
 const linkKey = /^chrome-extension:\/\/[a-p]{32}(\|[a-f0-9]{32})?$/
 const originOf = key => String(key).split('|')[0]
-const MAX_BODY = 2 * 1024 * 1024 // the extension sends one copy of a page, within a 300,000-character budget (at most four bytes each, plus escaping)
+const MAX_BODY = 6 * 1024 * 1024 // one copy of a page (a 300,000-character budget, at most four bytes each, plus escaping) and one picture of it
+const MAX_PICTURE = 3 * 1024 * 1024 // bytes of the picture of the visible page the owner adds in the side panel (JPEG or PNG)
 const fail = code => Object.assign(new Error(code), { code })
 const demoPage = language => {
   const ar = language === 'ar'
@@ -28,11 +29,52 @@ const demoPage = language => {
 const MAX_LINKS = 4
 const PAIR_TTL_MS = 2 * 60 * 1000
 const MAX_ASKS = 20
+const MAX_PAGE_TEXT = 12000 // characters of the open page's visible text sent with a side-panel question
+const MAX_ATTACHMENT = 20000 // characters of a text file attached in the side panel
+const MAX_TABS = 3, MAX_TAB_TEXT = 6000 // other open tabs the owner picked with @ in the side panel, and the characters of each
 const MAX_ANSWER = 60000 // characters of an answer shown in the browser panel; a longer one is cut and the panel says so
 const TERMINAL = ['done', 'failed', 'cancelled']
+const MAX_STEPS = 40 // tool-call steps shown under one answer in the side panel
+const STEP_KINDS = ['reasoning', 'read', 'browse', 'work', 'approval']
+const SESSION_IDLE_MS = 2 * 60 * 1000 // a browser session (the banner in the browser) ends this long after NAJD's last command
 const origin64 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
 const same = (left, right) => { const a = Buffer.from(String(left)), b = Buffer.from(String(right)); return a.length === b.length && a.length > 0 && timingSafeEqual(a, b) }
 const digits = () => String(randomInt(0, 1000000)).padStart(6, '0')
+
+// The live "Tool calls" list of a side-panel answer, derived from the task's recorded activity (task-activity.cjs events).
+// Only kinds, states, tool names and short redacted details leave NAJD; the model's own thinking text never does.
+function stepsFromEvents(events) {
+  const steps = []
+  const close = (state, match) => { for (let i = steps.length - 1; i >= 0; i--) if (steps[i].state === 'running' && match(steps[i])) { steps[i].state = state; return } }
+  const closeAll = state => { for (const step of steps) if (step.state === 'running') step.state = state }
+  const kindOf = tool => /browser/.test(tool) ? 'browse' : /read|web|fetch|search|knowledge|chats|files|document/.test(tool) ? 'read' : 'work'
+  const acting = step => step.kind !== 'reasoning' && step.kind !== 'approval'
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!event || typeof event !== 'object') continue
+    const tool = typeof event.tool === 'string' && /^najd-[a-z-]{1,60}$/.test(event.tool) ? event.tool : undefined
+    const detail = typeof event.detail === 'string' ? event.detail.replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 160) : ''
+    switch (event.type) {
+      case 'task.started': steps.push({ kind: 'reasoning', state: 'running' }); break
+      case 'reasoning.summary': {
+        const open = [...steps].reverse().find(step => step.kind === 'reasoning' && step.state === 'running')
+        if (open) { if (detail) open.detail = detail } else steps.push({ kind: 'reasoning', state: 'running', ...(detail ? { detail } : {}) })
+        break
+      }
+      case 'tool.started': close('done', step => step.kind === 'reasoning'); steps.push({ kind: kindOf(tool || ''), state: 'running', ...(tool ? { tool } : {}), ...(detail ? { detail } : {}) }); break
+      case 'tool.completed': close('done', step => acting(step) && step.tool === tool); break
+      case 'tool.failed': close('failed', step => acting(step) && step.tool === tool); break
+      case 'approval.requested': steps.push({ kind: 'approval', state: 'running' }); break
+      case 'approval.resolved': close(event.decision === 'DENY' ? 'failed' : 'done', step => step.kind === 'approval'); break
+      case 'task.completed': closeAll('done'); break
+      case 'task.failed': case 'task.cancelled': case 'task.unknown_effect': closeAll('failed'); break
+    }
+  }
+  return steps.slice(-MAX_STEPS)
+}
+// What the bridge accepts as steps (the app derives them; anything else is dropped).
+const cleanSteps = value => Array.isArray(value) ? value.slice(-MAX_STEPS).filter(step => step && typeof step === 'object' && STEP_KINDS.includes(step.kind) && ['running', 'done', 'failed'].includes(step.state))
+  .map(step => ({ kind: step.kind, state: step.state, ...(typeof step.tool === 'string' && /^najd-[a-z-]{1,60}$/.test(step.tool) ? { tool: step.tool } : {}),
+    ...(typeof step.detail === 'string' && step.detail.trim() ? { detail: step.detail.replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 160) } : {}) })) : null
 
 // ready: resolves once masking is available (saved passwords loaded); a question is not read, masked or stored before that, and is refused if it fails.
 // sanitize: applied to every page the extension reports, before it is stored or handed on (secrets must not outlive the moment they are seen).
@@ -49,7 +91,12 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
   let lastPage = null // latest page snapshot reported by the extension
   let pageGeneration = 0 // changes with every page report: an approval is only valid for the page it was given for
   let lastPageOrigin = null // the browser that page came from: element ids and approvals only ever apply to that browser
-  const handlers = { onPairRequest: () => {}, onAsk: () => {}, onAskCancel: () => {} }
+  const handlers = { onPairRequest: () => {}, onAsk: () => {}, onAskCancel: () => {}, onModels: async () => [], onSkills: async () => [], onSessionStop: () => {}, onAskShow: () => {} }
+  // Models the side panel may choose from: exactly the list NAJD served last (a choice outside it is ignored, never trusted).
+  let modelChoices = []
+  // The task using the browser now (its commands carry it as owner). The extension shows a banner with Cancel while it lasts.
+  let session = null // { owner, since, lastAt }
+  const sessionActive = () => !!session && now() - session.lastAt < SESSION_IDLE_MS
 
   async function load() {
     try {
@@ -101,14 +148,18 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
     const instance = request.headers['x-najd-instance']
     const identity = typeof instance === 'string' && /^[a-f0-9]{32}$/.test(instance) ? base + '|' + instance : base
     if (sentOrigin) { response.setHeader('Access-Control-Allow-Origin', sentOrigin); response.setHeader('Vary', 'Origin') }
-    response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-NAJD-Extension, X-NAJD-Instance'); response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-NAJD-Extension, X-NAJD-Instance, X-NAJD-Version'); response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     response.setHeader('Cache-Control', 'no-store')
     return identity
   }
   const linkFor = (request, identity) => {
     const link = links.get(identity)
     const supplied = String(request.headers.authorization || '').replace(/^Bearer /, '')
-    return link && same(supplied, link.secret) ? link : null
+    if (!link || !same(supplied, link.secret)) return null
+    // The version of the extension actually loaded in that browser, as it reports it with every call (shown in Settings and checked by NAJD).
+    const version = request.headers['x-najd-version']
+    if (typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version)) link.loadedVersion = version
+    return link
   }
   const json = (response, status, body) => response.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body))
   async function readJson(request, response) {
@@ -135,7 +186,7 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
       link.waiting = null; clearTimeout(response.timer)
       command.link = link.origin
       inflight.set(command.id, command)
-      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ id: command.id, kind: command.kind, args: command.args }))
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ id: command.id, kind: command.kind, args: command.args, ...(command.owner ? { session: true } : {}) }))
     }
   }
   // Removes one browser: its commands end, outstanding pairing approvals for it are void, and the fallback code changes.
@@ -156,15 +207,39 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
 
   // Longer than the final limits by OVERLAP: values are masked first and only then cut (a password at a limit cannot leak its start).
   const OVERLAP = 9100 // the longest encoded form of a saved password (1000 characters, up to 9 each: a BMP character is nine characters under encodeURIComponent)
+  const cleanUrl = value => {
+    try { const parsed = new URL(String(value)); if (['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password) { parsed.hash = ''; return parsed.toString().slice(0, 500 + OVERLAP) } } catch {}
+    return ''
+  }
   const cleanPage = value => {
     if (!value || typeof value !== 'object') return null
-    let url = ''
-    try { const parsed = new URL(String(value.url)); if (['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password) { parsed.hash = ''; url = parsed.toString().slice(0, 500 + OVERLAP) } } catch {}
-    return { url, title: String(value.title || '').replace(/[\x00-\x1f]+/g, ' ').slice(0, 200 + OVERLAP), selection: String(value.selection || '').replace(/[\x00-\x08\x0b-\x1f]+/g, ' ').slice(0, 2000 + OVERLAP) }
+    const url = cleanUrl(value.url)
+    const block = (text, limit) => String(text || '').replace(/[\x00-\x08\x0b-\x1f]+/g, ' ').slice(0, limit + OVERLAP)
+    const attachment = value.attachment && typeof value.attachment === 'object' && typeof value.attachment.text === 'string' && value.attachment.text.trim()
+      ? { name: String(value.attachment.name || '').replace(/[\x00-\x1f\\/]+/g, ' ').trim().slice(0, 120), text: block(value.attachment.text, MAX_ATTACHMENT) } : null
+    // Other tabs named with @: only web pages, at most MAX_TABS, each with its own address, title and visible text.
+    const tabs = (Array.isArray(value.tabs) ? value.tabs.slice(0, MAX_TABS) : []).map(tab => tab && typeof tab === 'object'
+      ? { url: cleanUrl(tab.url), title: String(tab.title || '').replace(/[\x00-\x1f]+/g, ' ').slice(0, 200 + OVERLAP), text: block(tab.text, MAX_TAB_TEXT) } : null).filter(tab => tab?.url)
+    return { url, title: String(value.title || '').replace(/[\x00-\x1f]+/g, ' ').slice(0, 200 + OVERLAP), selection: block(value.selection, 2000),
+      text: block(value.text, MAX_PAGE_TEXT), lang: typeof value.lang === 'string' && /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{1,8})?$/.test(value.lang) ? value.lang : '', attachment, ...(tabs.length ? { tabs } : {}) }
+  }
+  // The picture of the page (base64 from the panel): a JPEG or PNG within MAX_PICTURE, recognised by its first bytes; anything else is refused.
+  const cleanPicture = value => {
+    if (typeof value !== 'string' || !value || value.length > Math.ceil(MAX_PICTURE / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null
+    const bytes = Buffer.from(value, 'base64')
+    if (!bytes.length || bytes.length > MAX_PICTURE) return null
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { name: 'page.jpg', bytes }
+    if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { name: 'page.png', bytes }
+    return null
   }
   // A selection longer than the limit is cut AND says so inside the text the model receives (the panel also warns before sending).
   const boundSelection = text => { const value = String(text || ''); return value.length > 2000 ? value.slice(0, 1900) + '\n[…only the first 1900 of ' + value.length + ' selected characters were supplied]' : value }
-  const boundQuestionPage = page => page ? { url: String(page.url || '').slice(0, 500), title: String(page.title || '').slice(0, 200), selection: boundSelection(page.selection) } : null
+  // The visible text of the page and an attached text file are cut the same way, and say so inside the text.
+  const boundBlock = (text, limit, what) => { const value = String(text || ''); return value.length > limit ? value.slice(0, limit - 100) + '\n[…cut: only the first ' + (limit - 100) + ' characters of the ' + what + ' were supplied]' : value }
+  const boundQuestionPage = page => page ? { url: String(page.url || '').slice(0, 500), title: String(page.title || '').slice(0, 200), selection: boundSelection(page.selection),
+    text: boundBlock(page.text, MAX_PAGE_TEXT, 'page text'), lang: page.lang || '',
+    ...(page.attachment ? { attachment: { name: page.attachment.name, text: boundBlock(page.attachment.text, MAX_ATTACHMENT, 'attached file') } } : {}),
+    ...(page.tabs?.length ? { tabs: page.tabs.map(tab => ({ url: String(tab.url).slice(0, 500), title: String(tab.title || '').slice(0, 200), text: boundBlock(tab.text, MAX_TAB_TEXT, 'tab text') })) } : {}) } : null
   // The extension's page report is masked and then cut to the limits the rest of NAJD expects.
   const boundReport = page => {
     if (!page || typeof page !== 'object') return page
@@ -175,7 +250,7 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
         ...(item.formIncomplete === true || (typeof item.form === 'string' && item.form.length > 4000) || (typeof item.formAction === 'string' && item.formAction.length > 2000) ? { formIncomplete: true } : {}),
         ...(Array.isArray(item.options) ? { options: item.options.map(option => cutString(option, 60)) } : {}) } : item) : page.elements }
   }
-  const askView = ask => ({ id: ask.id, state: ask.state, progress: ask.progress, output: ask.output, outputTruncated: (ask.outputLength || 0) > MAX_ANSWER, outputLength: ask.outputLength || 0, needsApproval: ask.needsApproval, updatedAt: ask.updatedAt })
+  const askView = ask => ({ id: ask.id, state: ask.state, progress: ask.progress, output: ask.output, outputTruncated: (ask.outputLength || 0) > MAX_ANSWER, outputLength: ask.outputLength || 0, needsApproval: ask.needsApproval, steps: ask.steps || [], updatedAt: ask.updatedAt })
 
   async function handle(request, response) {
     const route = new URL(request.url, 'http://127.0.0.1')
@@ -236,7 +311,8 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
     const link = linkFor(request, identity)
     if (!link) { response.writeHead(401).end(); return }
     link.lastSeenAt = now()
-    if (route.pathname === '/v2/hello' && request.method === 'GET') { json(response, 200, { ok: true, app: 'NAJD AGENT', version: 3 }); return }
+    // chat: this app continues side-panel follow-ups in one conversation and takes page text, models and tool-call steps (R-067).
+    if (route.pathname === '/v2/hello' && request.method === 'GET') { json(response, 200, { ok: true, app: 'NAJD AGENT', version: 3, chat: true }); return }
     if (route.pathname === '/v2/unlink' && request.method === 'POST') { revoke(identity); await save(); json(response, 200, { ok: true }); return }
     if (route.pathname === '/v2/command/next' && request.method === 'GET') {
       if (link.waiting) { clearTimeout(link.waiting.timer); link.waiting.writeHead(204).end() }
@@ -266,6 +342,8 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
       try { await ready() } catch { json(response, 503, { ok: false, error: 'PROTECTION_UNAVAILABLE' }); return }
       const text = typeof input?.text === 'string' ? sanitize(input.text.replace(/\u0000/g, '').trim()) : ''
       if (!text || text.length > 4000000) { json(response, 400, { ok: false, error: 'INVALID_INPUT' }); return }
+      const picture = input?.page && typeof input.page === 'object' && input.page.picture !== undefined ? cleanPicture(input.page.picture) : undefined
+      if (picture === null) { json(response, 400, { ok: false, error: 'INVALID_INPUT' }); return }
       if (!recent(askHistory, identity, 60 * 1000, 6)) { json(response, 429, { ok: false, error: 'TOO_MANY_REQUESTS' }); return }
       // Only finished questions are forgotten to make room; a running one must stay stoppable.
       while (asks.size >= MAX_ASKS) {
@@ -274,18 +352,53 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
         asks.delete(old.id)
       }
       if (asks.size >= MAX_ASKS) { json(response, 429, { ok: false, error: 'TOO_MANY_ACTIVE' }); return }
-      const ask = { id: randomBytes(12).toString('hex'), origin: identity, text, page: boundQuestionPage(sanitize(cleanPage(input.page))), state: 'queued', taskId: null, progress: '', output: '', needsApproval: false, createdAt: now(), updatedAt: now() }
+      // A follow-up continues the conversation of an earlier question from this same browser (one that reached a task); anything else starts a new one.
+      const previous = typeof input?.after === 'string' ? asks.get(input.after) : null
+      const after = previous && previous.origin === identity && previous.taskId ? { taskId: previous.taskId } : null
+      const chosen = input?.model && typeof input.model === 'object' ? modelChoices.find(item => item.provider === input.model.provider && item.model === input.model.model) : null
+      const ask = { id: randomBytes(12).toString('hex'), origin: identity, text, page: boundQuestionPage(sanitize(cleanPage(input.page))), state: 'queued', taskId: null, progress: '', output: '', needsApproval: false, steps: [], createdAt: now(), updatedAt: now() }
       asks.set(ask.id, ask)
       let accepted = true
-      try { accepted = (await handlers.onAsk({ id: ask.id, text: ask.text, page: ask.page })) !== false } catch { accepted = false }
+      try { accepted = (await handlers.onAsk({ id: ask.id, text: ask.text, page: ask.page, after, model: chosen ? { provider: chosen.provider, model: chosen.model } : null, ...(picture ? { picture } : {}) })) !== false } catch { accepted = false }
       if (!accepted) { ask.state = 'failed'; ask.progress = 'NAJD_BUSY' }
       json(response, 200, { ok: accepted, id: ask.id, state: ask.state })
       return
     }
-    const askRoute = /^\/v2\/ask\/([a-f0-9]{24})(\/cancel)?$/.exec(route.pathname)
+    // Models NAJD can answer with, for the panel's model selector (names only; a choice is checked against this list).
+    if (route.pathname === '/v2/models' && request.method === 'GET') {
+      let list
+      try { list = await Promise.race([handlers.onModels(), new Promise(resolve => { setTimeout(() => resolve(null), 6000).unref?.() })]) } catch { list = null }
+      if (Array.isArray(list)) modelChoices = list.filter(item => item && typeof item.provider === 'string' && /^[a-z0-9-]{1,40}$/.test(item.provider) && typeof item.model === 'string' && item.model.length > 0 && item.model.length <= 200)
+        .slice(0, 200).map(item => ({ provider: item.provider, providerName: String(item.providerName || item.provider).replace(/[\x00-\x1f]+/g, ' ').slice(0, 60), model: item.model, name: String(item.name || item.model).replace(/[\x00-\x1f]+/g, ' ').slice(0, 100) }))
+      json(response, 200, { ok: true, models: modelChoices })
+      return
+    }
+    // Skills for "/" in the panel (names and short descriptions only; choosing one only writes "Use the skill ..." into the question box).
+    if (route.pathname === '/v2/skills' && request.method === 'GET') {
+      let list
+      try { list = await Promise.race([handlers.onSkills(), new Promise(resolve => { setTimeout(() => resolve(null), 6000).unref?.() })]) } catch { list = null }
+      const skills = (Array.isArray(list) ? list : []).filter(item => item && typeof item.id === 'string' && /^[a-z0-9][a-z0-9-]{0,79}$/.test(item.id)).slice(0, 400)
+        .map(item => ({ id: item.id, name: String(item.name || item.id).replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 80) || item.id, description: String(item.description || '').replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 160) }))
+      json(response, 200, { ok: true, skills })
+      return
+    }
+    // The banner in the browser: whether NAJD is working in this browser now, and Cancel (which stops that task in the app).
+    if (route.pathname === '/v2/session' && request.method === 'GET') { const active = sessionActive() && lastPageOrigin === identity; json(response, 200, { ok: true, active, since: active ? session.since : null }); return }
+    if (route.pathname === '/v2/session/stop' && request.method === 'POST') {
+      const owner = sessionActive() && lastPageOrigin === identity ? session.owner : null
+      if (owner) {
+        session = null
+        for (const entry of [...queue]) if (entry.owner === owner) { queue.splice(queue.indexOf(entry), 1); clearTimeout(entry.timer); entry.reject(fail('CANCELLED')) }
+        try { handlers.onSessionStop({ taskId: owner }) } catch {}
+      }
+      json(response, 200, { ok: true, stopped: !!owner }); return
+    }
+    const askRoute = /^\/v2\/ask\/([a-f0-9]{24})(\/cancel|\/show)?$/.exec(route.pathname)
     if (askRoute) {
       const ask = asks.get(askRoute[1])
       if (!ask || ask.origin !== identity) { json(response, 404, { ok: false, error: 'NOT_FOUND' }); return }
+      // "Review in NAJD": brings the app forward where the approval waits (the decision itself is only ever made there).
+      if (askRoute[2] === '/show' && request.method === 'POST') { try { handlers.onAskShow({ id: ask.id, taskId: ask.taskId }) } catch {} json(response, 200, { ok: true }); return }
       if (askRoute[2] && request.method === 'POST') {
         // Recorded by id at once: a question that has not started yet is cancelled before it can start.
         ask.cancelled = true
@@ -319,7 +432,7 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
     throw fail('PORT_IN_USE')
   }
   function status() {
-    const list = [...links.values()].map(link => ({ id: originOf(link.origin).slice('chrome-extension://'.length), instance: link.origin.split('|')[1] || '', name: link.name, connected: connected(link), lastSeenAt: link.lastSeenAt ? new Date(link.lastSeenAt).toISOString() : null, createdAt: link.createdAt ? new Date(link.createdAt).toISOString() : null }))
+    const list = [...links.values()].map(link => ({ version: link.loadedVersion || null, id: originOf(link.origin).slice('chrome-extension://'.length), instance: link.origin.split('|')[1] || '', name: link.name, connected: connected(link), lastSeenAt: link.lastSeenAt ? new Date(link.lastSeenAt).toISOString() : null, createdAt: link.createdAt ? new Date(link.createdAt).toISOString() : null }))
     const last = [...links.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0]
     return { active: !!server, port, connected: list.some(item => item.connected), paired: links.size > 0, links: list, lastSeenAt: last?.lastSeenAt ? new Date(last.lastSeenAt).toISOString() : null,
       page: lastPage ? { title: String(lastPage.title || '').slice(0, 200), url: String(lastPage.url || '').slice(0, 500) } : null }
@@ -337,19 +450,27 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
   // Send one command to the active extension and wait for its result (one at a time, in order).
   // bind: the page token captured before an approval. The command then goes only to that browser and only while that page is current:
   // never to another browser that happens to be connected (element ids and approvals belong to one page of one browser).
-  function command(kind, args = {}, { timeoutMs = 30000, signal, bind = null } = {}) {
+  // owner: the task (run id) sending the command; while it works, the browser shows NAJD's banner with Cancel.
+  // prefer: the browser the user named ("edge", "chrome"): matched against the linked browser's name when several are connected; used only
+  // by commands that choose a browser (open, attach), never by commands bound to an approved page.
+  function command(kind, args = {}, { timeoutMs = 30000, signal, bind = null, owner = null, prefer = '' } = {}) {
     if (!server) return Promise.reject(fail('BROWSER_NOT_CONNECTED'))
     // Commands follow the page: the browser that reported the current page keeps getting them while it is connected.
     // Otherwise the most recently seen browser is used and the old page (its element ids) is dropped.
     if (bind !== null && bind !== pageToken()) return Promise.reject(fail('PAGE_CHANGED'))
     const bound = lastPageOrigin ? links.get(lastPageOrigin) : null
-    const target = bind !== null ? (connected(bound) ? bound : null) : connected(bound) ? bound : activeLink()
+    const wanted = typeof prefer === 'string' ? prefer.trim().toLowerCase().slice(0, 30) : ''
+    const named = link => !wanted || String(link?.name || '').toLowerCase().includes(wanted)
+    const choose = () => [...links.values()].filter(link => connected(link) && named(link)).sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0] || null
+    const target = bind !== null ? (connected(bound) ? bound : null) : connected(bound) && named(bound) ? bound : wanted ? choose() : activeLink()
     if (!target) return Promise.reject(fail('BROWSER_NOT_CONNECTED'))
     if (signal?.aborted) return Promise.reject(fail('CANCELLED'))
     if (target.origin !== lastPageOrigin) { lastPage = null; lastPageOrigin = null; pageGeneration++ }
     return new Promise((resolve, reject) => {
       const id = randomUUID()
-      const entry = { id, kind, args, resolve, reject, link: null, target: target.origin, bind }
+      const ownerId = typeof owner === 'string' && /^[0-9a-f-]{36}$/.test(owner) && kind !== 'park' ? owner : null
+      if (ownerId) session = session?.owner === ownerId ? { ...session, lastAt: now() } : { owner: ownerId, since: now(), lastAt: now() }
+      const entry = { id, kind, args, resolve, reject, link: null, target: target.origin, bind, owner: ownerId }
       entry.timer = setTimeout(() => {
         const index = queue.indexOf(entry); if (index >= 0) queue.splice(index, 1)
         inflight.delete(id); reject(fail(index >= 0 ? 'BROWSER_NOT_CONNECTED' : 'BROWSER_ACTION_UNKNOWN'))
@@ -362,6 +483,8 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
   return {
     start, stop, status, command,
     lastPage: () => lastPage,
+    // The name of the browser that holds the current page ("Microsoft Edge"), so a result can say where it ran.
+    lastBrowser: () => (lastPageOrigin ? String(links.get(lastPageOrigin)?.name || '') : ''),
     // Drops the page NAJD holds (after a refusal): no content, no element ids, no approvals bound to it.
     forgetPage() { lastPage = null; lastPageOrigin = null; pageGeneration++ },
     pageToken,
@@ -401,13 +524,29 @@ function createBrowserBridge({ filePath, encryption, ports = PORTS, pollMs = 250
       if (typeof patch.taskId === 'string' && /^[0-9a-f-]{36}$/.test(patch.taskId)) ask.taskId = patch.taskId
       if (typeof patch.progress === 'string' && (!finished || unknownAfterStop)) ask.progress = patch.progress.replace(/[\x00-\x1f]+/g, ' ').slice(0, 200)
       if (typeof patch.output === 'string' && (!finished || ((ask.state === 'done' || ask.progress === 'UNKNOWN_EFFECT') && !ask.output))) { ask.output = patch.output.slice(0, MAX_ANSWER); ask.outputLength = patch.output.length }
+      const steps = cleanSteps(patch.steps)
+      if (steps && (!finished || !ask.steps?.length)) ask.steps = steps
       if (TERMINAL.includes(ask.state)) ask.needsApproval = false
       else if (typeof patch.needsApproval === 'boolean') ask.needsApproval = patch.needsApproval
       ask.updatedAt = now()
       return true
     },
     getAsk: id => { const ask = asks.get(id); return ask ? { ...askView(ask), taskId: ask.taskId, cancelled: ask.cancelled === true } : null },
+    // The task using the browser now, and the end of its session (the app calls this when that task finishes).
+    sessionOwner: () => (sessionActive() ? session.owner : null),
+    endSession: taskId => { if (session && session.owner === taskId) session = null },
     demoUrl: language => { if (!port) throw fail('BROWSER_NOT_CONNECTED'); return `http://127.0.0.1:${port}/demo?lang=${language === 'ar' ? 'ar' : 'en'}` }
   }
 }
-module.exports = { createBrowserBridge, BRIDGE_PORTS: PORTS }
+// Marks each linked extension older than the copy NAJD ships for its major version (1.x or 2.x): an unpacked extension keeps running
+// its old code until the owner presses Reload in the browser, so NAJD says so instead of failing on a newer command later.
+const versionParts = value => (typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value) ? value.split('.').map(Number) : null)
+function markOutdated(links, bundled = {}) {
+  return (Array.isArray(links) ? links : []).map(link => {
+    const have = versionParts(link?.version), latest = have && versionParts(bundled[have[0]]) ? bundled[have[0]] : null
+    const want = versionParts(latest)
+    const older = !!(have && want) && (have[1] < want[1] || (have[1] === want[1] && have[2] < want[2]))
+    return { ...link, latest, outdated: older }
+  })
+}
+module.exports = { createBrowserBridge, stepsFromEvents, markOutdated, BRIDGE_PORTS: PORTS }

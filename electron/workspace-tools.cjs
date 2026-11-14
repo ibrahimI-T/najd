@@ -116,7 +116,9 @@ function createWorkspaceTools({ getRoots, workspace, getProtectedRoots = () => [
       const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
       const start = Math.max(0, Math.min(Number.isInteger(offset) ? offset : 0, text.length))
       const size = Math.max(1, Math.min(Number.isInteger(limit) ? limit : MAX_READ, MAX_READ))
-      return { text: text.slice(start, start + size), offset: start, characters: text.length, hasMore: start + size < text.length }
+      const more = start + size < text.length
+      // A partial read says so in words: a small model once asked for limit 10 (meaning lines) and reported the file as 'The meetin' (live 2026-11-09).
+      return { text: text.slice(start, start + size), offset: start, characters: text.length, hasMore: more, ...(more ? { nextOffset: start + size, note: 'Partial: characters ' + start + ' to ' + (start + size) + ' of ' + text.length + '. Call again with offset ' + (start + size) + ' (and no limit) to read the rest before answering.' } : {}) }
     } finally { await handle.close() }
   }
 

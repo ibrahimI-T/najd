@@ -1,0 +1,395 @@
+{
+  "extName": {
+    "message": "متصفح نجد"
+  },
+  "extDescription": {
+    "message": "يربط متصفحك بتطبيق NAJD AGENT على جهازك ليتصفح عنك وينجز المهام ويجيبك من اللوحة الجانبية. كل شيء محلي على جهازك."
+  },
+  "actionTitle": {
+    "message": "نجد AGENT"
+  },
+  "contextAskSelection": {
+    "message": "اسأل نجد عن \"%s\""
+  },
+  "contextAskPage": {
+    "message": "اسأل نجد عن هذه الصفحة"
+  },
+  "tagline": {
+    "message": "وكيلك بجانب كل صفحة"
+  },
+  "statusConnected": {
+    "message": "متصل بنجد"
+  },
+  "statusOffline": {
+    "message": "نجد غير مفتوح"
+  },
+  "statusUnlinked": {
+    "message": "غير مربوط"
+  },
+  "statusPairing": {
+    "message": "بانتظار تأكيدك"
+  },
+  "statusSearching": {
+    "message": "جاري البحث عن نجد…"
+  },
+  "connectTitle": {
+    "message": "الاتصال بنجد"
+  },
+  "connectBody": {
+    "message": "اربط هذا المتصفح بتطبيق NAJD AGENT على هذا الجهاز. سيطلب نجد تأكيدك في نافذته، والربط نفسه لا يخرج من جهازك."
+  },
+  "connectButton": {
+    "message": "اتصال"
+  },
+  "searching": {
+    "message": "جاري البحث عن نجد على هذا الجهاز…"
+  },
+  "notFound": {
+    "message": "لم يُعثر على نجد. افتح تطبيق NAJD AGENT على هذا الجهاز ثم أعد المحاولة."
+  },
+  "pairingTitle": {
+    "message": "أكّد في نافذة نجد"
+  },
+  "pairingBody": {
+    "message": "تظهر في نجد نافذة بنفس الرمز. اسمح فقط إذا تطابق الرمزان."
+  },
+  "denied": {
+    "message": "رُفض الاتصال في نجد."
+  },
+  "expired": {
+    "message": "انتهت مهلة الطلب. أعد المحاولة."
+  },
+  "busy": {
+    "message": "طلبات كثيرة. انتظر دقائق ثم أعد المحاولة."
+  },
+  "retry": {
+    "message": "إعادة المحاولة"
+  },
+  "siteTitle": {
+    "message": "السماح لنجد بالعمل على المواقع"
+  },
+  "siteBody": {
+    "message": "ليتصفح نجد وينفّذ في تبويبه الخاص يحتاج الوصول إلى المواقع التي يفتحها لك. يعمل داخل مجموعة تبويبات نجد فقط وعندما تطلب منه."
+  },
+  "siteButton": {
+    "message": "السماح لكل المواقع"
+  },
+  "askLabel": {
+    "message": "اسأل نجد"
+  },
+  "askPlaceholder": {
+    "message": "ماذا تريد من نجد أن يفعل؟"
+  },
+  "includePage": {
+    "message": "تضمين هذه الصفحة"
+  },
+  "selectionChip": {
+    "message": "النص المحدد مُضمَّن"
+  },
+  "sendButton": {
+    "message": "إرسال"
+  },
+  "stopButton": {
+    "message": "إيقاف"
+  },
+  "newAsk": {
+    "message": "سؤال جديد"
+  },
+  "working": {
+    "message": "يعمل…"
+  },
+  "queued": {
+    "message": "بانتظار نجد…"
+  },
+  "waitingApproval": {
+    "message": "نجد ينتظر موافقتك داخل التطبيق."
+  },
+  "done": {
+    "message": "تم"
+  },
+  "failed": {
+    "message": "تعذّر على نجد إكمال هذا."
+  },
+  "cancelled": {
+    "message": "أُوقف"
+  },
+  "unconfirmed": {
+    "message": "نتيجة الإجراء غير مؤكدة. تحقّق قبل أي إعادة."
+  },
+  "copy": {
+    "message": "نسخ"
+  },
+  "copied": {
+    "message": "تم النسخ"
+  },
+  "askFailed": {
+    "message": "تعذّر إرسال السؤال. هل نجد مفتوح؟"
+  },
+  "tooMany": {
+    "message": "أسئلة كثيرة في دقيقة. انتظر قليلًا."
+  },
+  "unlinkButton": {
+    "message": "فصل هذا المتصفح"
+  },
+  "manualTitle": {
+    "message": "الربط برمز"
+  },
+  "manualHint": {
+    "message": "الصق الرمز من إعدادات نجد ← المتصفح. يعمل مرة واحدة."
+  },
+  "manualPlaceholder": {
+    "message": "رمز الربط"
+  },
+  "manualButton": {
+    "message": "ربط"
+  },
+  "badCode": {
+    "message": "الرمز غير صحيح أو استُخدم من قبل."
+  },
+  "offlineHelp": {
+    "message": "نجد غير مفتوح. افتحه وتعيد هذه اللوحة الاتصال تلقائيًا."
+  },
+  "toolFiles": {
+    "message": "يعمل على الملفات"
+  },
+  "toolSearch": {
+    "message": "يبحث"
+  },
+  "toolWeb": {
+    "message": "يقرأ من الويب"
+  },
+  "toolBrowser": {
+    "message": "يستخدم المتصفح"
+  },
+  "toolCommand": {
+    "message": "ينفّذ أمرًا"
+  },
+  "toolPython": {
+    "message": "يشغّل سكربتًا"
+  },
+  "toolSkill": {
+    "message": "يستخدم مهارة"
+  },
+  "toolDesktop": {
+    "message": "يتحكم بسطح المكتب"
+  },
+  "toolOther": {
+    "message": "يعمل…"
+  },
+  "privacy": {
+    "message": "تتحدث فقط مع تطبيق نجد على هذا الجهاز (127.0.0.1) ولا يُخزَّن شيء في السحابة. لا تُشارَك الصفحة إلا مع سؤال ترسله. الإجابات من مزوّد الذكاء الاصطناعي المختار في نجد، والكتابة بالصوت تستخدم خدمة الكلام في متصفحك."
+  },
+  "defaultSelectionQuestion": {
+    "message": "اشرح لي هذا النص المحدد."
+  },
+  "pageUnavailable": {
+    "message": "لا يستطيع نجد قراءة هذه الصفحة قبل السماح بالوصول إلى المواقع (انظر أعلاه)، أو أنها صفحة من صفحات المتصفح. اضغط إرسال مرة أخرى للسؤال بدونها، أو ألغِ «تضمين هذه الصفحة»."
+  },
+  "answerTruncated": {
+    "message": "هذه الإجابة طويلة: يظهر ويُنسخ هنا جزؤها الأول فقط. الإجابة الكاملة في محادثة نجد."
+  },
+  "selectionTooLong": {
+    "message": "النص المحدد أطول مما يأخذه نجد (2000 حرف): سيُستخدم جزؤه الأول فقط. اضغط إرسال مرة أخرى للمتابعة، أو حدّد أقل."
+  },
+  "emptyTitle": {
+    "message": "كيف يساعدك نجد في هذه الصفحة؟"
+  },
+  "emptyBody": {
+    "message": "اسأل عن الذي تقرؤه. لا يرى نجد هذه الصفحة إلا إذا أرسلت سؤالًا مع تضمينها."
+  },
+  "quickSummarize": {
+    "message": "لخّص هذه الصفحة"
+  },
+  "quickTranslate": {
+    "message": "ترجم"
+  },
+  "quickExplain": {
+    "message": "اشرح"
+  },
+  "promptSummarize": {
+    "message": "لخّص هذه الصفحة: النقاط الرئيسية أولًا، ثم أي شيء مهم يجب معرفته."
+  },
+  "promptTranslate": {
+    "message": "ترجم المحتوى الرئيسي لهذه الصفحة. إذا كانت بالعربية فترجمها إلى الإنجليزية، وإلا فإلى العربية."
+  },
+  "promptExplain": {
+    "message": "اشرح هذه الصفحة بكلمات بسيطة."
+  },
+  "pageNone": {
+    "message": "لا توجد صفحة قابلة للقراءة في هذا التبويب"
+  },
+  "attachLabel": {
+    "message": "إرفاق ملف نصي"
+  },
+  "attachRemove": {
+    "message": "إزالة الملف المرفق"
+  },
+  "attachTooBig": {
+    "message": "أرفق ملفًا نصيًا حجمه حتى 500 كيلوبايت (txt، md، csv، json، html)."
+  },
+  "attachNotText": {
+    "message": "يمكن إرفاق الملفات النصية فقط هنا."
+  },
+  "voiceLabel": {
+    "message": "الكتابة بالصوت"
+  },
+  "voiceUnavailable": {
+    "message": "الكتابة بالصوت غير متاحة في هذا المتصفح."
+  },
+  "voiceDenied": {
+    "message": "اسمح لهذه الإضافة باستخدام الميكروفون للكتابة بالصوت."
+  },
+  "voiceListening": {
+    "message": "جارٍ الاستماع…"
+  },
+  "modelLabel": {
+    "message": "النموذج"
+  },
+  "modelDefault": {
+    "message": "نموذج نجد"
+  },
+  "sendLabel": {
+    "message": "إرسال"
+  },
+  "stopLabel": {
+    "message": "إيقاف"
+  },
+  "newChat": {
+    "message": "محادثة جديدة"
+  },
+  "toolCalls": {
+    "message": "استدعاءات الأدوات"
+  },
+  "stepReasoning": {
+    "message": "التفكير"
+  },
+  "stepReadPage": {
+    "message": "قراءة الصفحة"
+  },
+  "stepRead": {
+    "message": "قراءة"
+  },
+  "stepBrowse": {
+    "message": "تصفح"
+  },
+  "stepWork": {
+    "message": "عمل"
+  },
+  "stepApproval": {
+    "message": "بانتظار موافقتك"
+  },
+  "reviewInNajd": {
+    "message": "راجِع في نجد"
+  },
+  "highlight": {
+    "message": "تمييز في الصفحة"
+  },
+  "highlightFound": {
+    "message": "تم تمييزه في الصفحة."
+  },
+  "highlightMissing": {
+    "message": "هذا النص غير موجود في هذه الصفحة."
+  },
+  "highlightBlocked": {
+    "message": "لا يستطيع نجد تمييز نص في هذه الصفحة."
+  },
+  "bannerText": {
+    "message": "بدأ نجد تصحيح أخطاء هذا المتصفح"
+  },
+  "bannerCancel": {
+    "message": "إلغاء"
+  },
+  "offlineTitle": {
+    "message": "تطبيق نجد غير مفتوح"
+  },
+  "offlineBody": {
+    "message": "افتح تطبيق NAJD AGENT على هذا الجهاز. تعيد هذه اللوحة الاتصال تلقائيًا وتحتفظ بمحادثتك."
+  },
+  "offlineRetry": {
+    "message": "حاول مرة أخرى"
+  },
+  "you": {
+    "message": "أنت"
+  },
+  "najd": {
+    "message": "نجد"
+  },
+  "appOldTitle": {
+    "message": "حدّث تطبيق نجد"
+  },
+  "appOldBody": {
+    "message": "تطبيق نجد هذا أقدم من الإضافة: كل سؤال يفتح محادثة جديدة، ولا يُستخدم نص الصفحة ولا اختيار النموذج ولا استدعاءات الأدوات. ثبّت أحدث نسخة من NAJD AGENT لتتحدث هنا."
+  },
+  "queueNote": {
+    "message": "سيُرسل عندما يجهز نجد"
+  },
+  "queueCancel": {
+    "message": "إلغاء"
+  },
+  "selectionBarAsk": {
+    "message": "اسأل نجد"
+  },
+  "selectionBarOn": {
+    "message": "زر التحديد: يعمل"
+  },
+  "selectionBarOff": {
+    "message": "زر التحديد: متوقف"
+  },
+  "mentionLabel": {
+    "message": "أضف تبويبًا مفتوحًا آخر (@)"
+  },
+  "mentionNone": {
+    "message": "لا توجد صفحات ويب أخرى مفتوحة في هذه النافذة"
+  },
+  "mentionRemove": {
+    "message": "إزالة هذا التبويب"
+  },
+  "mentionMax": {
+    "message": "حتى 3 تبويبات مع السؤال الواحد"
+  },
+  "skillLabel": {
+    "message": "استخدم إحدى مهارات نجد (/)"
+  },
+  "skillNone": {
+    "message": "لا توجد مهارة مطابقة"
+  },
+  "skillUnavailable": {
+    "message": "تعذّر تحميل مهارات نجد"
+  },
+  "historyLabel": {
+    "message": "المحادثات السابقة"
+  },
+  "historyTitle": {
+    "message": "محادثات سابقة في جلسة المتصفح هذه (كل الإجابات محفوظة أيضًا في نجد)"
+  },
+  "historyEmpty": {
+    "message": "لا توجد محادثات سابقة بعد. «محادثة جديدة» تحفظ هنا المحادثة التي تغلقها."
+  },
+  "historyOne": {
+    "message": "سؤال واحد"
+  },
+  "historyMany": {
+    "message": "$1 أسئلة"
+  },
+  "captureLabel": {
+    "message": "أرسل صورة للصفحة الظاهرة"
+  },
+  "captureRemove": {
+    "message": "إزالة الصورة"
+  },
+  "captureChip": {
+    "message": "صورة الصفحة (تُرسل مع السؤال)"
+  },
+  "captureSent": {
+    "message": "صورة الصفحة"
+  },
+  "captureNoPage": {
+    "message": "لا توجد صفحة ويب في هذه النافذة لالتقاط صورتها."
+  },
+  "captureFailed": {
+    "message": "لم يعطِ المتصفح صورة لهذه الصفحة. حاول مرة أخرى بعد اكتمال تحميلها."
+  },
+  "captureTooBig": {
+    "message": "صورة هذه الصفحة أكبر من أن تُرسل."
+  }
+}

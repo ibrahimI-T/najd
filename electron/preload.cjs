@@ -8,6 +8,57 @@ contextBridge.exposeInMainWorld('najdUpdates', {
   stability: () => ipcRenderer.invoke('najd:updates:stability'),
   openReleases: () => ipcRenderer.invoke('najd:updates:releases')
 })
+// Workstation services (electron/workstation/ipc.cjs): one narrow request per operation, no generic channel.
+const wsListener = (channel, listener) => { const handler = (_event, value) => listener(value); ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler) }
+contextBridge.exposeInMainWorld('najdWorkstation', {
+  catalog: (...args) => ipcRenderer.invoke('najd:ws:catalog', ...args),
+  sync: (...args) => ipcRenderer.invoke('najd:ws:sync', ...args),
+  addSource: (...args) => ipcRenderer.invoke('najd:ws:addSource', ...args),
+  removeSource: (...args) => ipcRenderer.invoke('najd:ws:removeSource', ...args),
+  setBuiltinEnabled: (...args) => ipcRenderer.invoke('najd:ws:setBuiltinEnabled', ...args),
+  planFile: (...args) => ipcRenderer.invoke('najd:ws:planFile', ...args),
+  planUrl: (...args) => ipcRenderer.invoke('najd:ws:planUrl', ...args),
+  install: (...args) => ipcRenderer.invoke('najd:ws:install', ...args),
+  localPackages: (...args) => ipcRenderer.invoke('najd:ws:localPackages', ...args),
+  planLocal: (...args) => ipcRenderer.invoke('najd:ws:planLocal', ...args),
+  installLocal: (...args) => ipcRenderer.invoke('najd:ws:installLocal', ...args),
+  setPackageEnabled: (...args) => ipcRenderer.invoke('najd:ws:setPackageEnabled', ...args),
+  connectPackageMcp: (...args) => ipcRenderer.invoke('najd:ws:connectPackageMcp', ...args),
+  rollback: (...args) => ipcRenderer.invoke('najd:ws:rollback', ...args),
+  skillEditable: id => ipcRenderer.invoke('najd:ws:skillEditable', id),
+  skillEdit: (id, description, steps) => ipcRenderer.invoke('najd:ws:skillEdit', id, description, steps),
+  removePackage: (...args) => ipcRenderer.invoke('najd:ws:removePackage', ...args),
+  openSkillsFolder: (...args) => ipcRenderer.invoke('najd:ws:openSkillsFolder', ...args),
+  skillGuide: (...args) => ipcRenderer.invoke('najd:ws:skillGuide', ...args),
+  tasks: (...args) => ipcRenderer.invoke('najd:ws:tasks', ...args),
+  taskCreate: (...args) => ipcRenderer.invoke('najd:ws:taskCreate', ...args),
+  taskUpdate: (...args) => ipcRenderer.invoke('najd:ws:taskUpdate', ...args),
+  taskStatus: (...args) => ipcRenderer.invoke('najd:ws:taskStatus', ...args),
+  taskRemove: (...args) => ipcRenderer.invoke('najd:ws:taskRemove', ...args),
+  taskRun: (...args) => ipcRenderer.invoke('najd:ws:taskRun', ...args),
+  remote: (...args) => ipcRenderer.invoke('najd:ws:remote', ...args),
+  remoteConfigure: (...args) => ipcRenderer.invoke('najd:ws:remoteConfigure', ...args),
+  remotePair: (...args) => ipcRenderer.invoke('najd:ws:remotePair', ...args),
+  remoteRevoke: (...args) => ipcRenderer.invoke('najd:ws:remoteRevoke', ...args),
+  tabs: (...args) => ipcRenderer.invoke('najd:ws:tabs', ...args),
+  tabOpen: (...args) => ipcRenderer.invoke('najd:ws:tabOpen', ...args),
+  tabClose: (...args) => ipcRenderer.invoke('najd:ws:tabClose', ...args),
+  tabNavigate: (...args) => ipcRenderer.invoke('najd:ws:tabNavigate', ...args),
+  tabBack: (...args) => ipcRenderer.invoke('najd:ws:tabBack', ...args),
+  tabForward: (...args) => ipcRenderer.invoke('najd:ws:tabForward', ...args),
+  tabReload: (...args) => ipcRenderer.invoke('najd:ws:tabReload', ...args),
+  tabShow: (...args) => ipcRenderer.invoke('najd:ws:tabShow', ...args),
+  tabRead: (...args) => ipcRenderer.invoke('najd:ws:tabRead', ...args),
+  tabWebMcp: (...args) => ipcRenderer.invoke('najd:ws:tabWebMcp', ...args),
+  system: (...args) => ipcRenderer.invoke('najd:ws:system', ...args),
+  systemSet: (...args) => ipcRenderer.invoke('najd:ws:systemSet', ...args),
+  documents: (...args) => ipcRenderer.invoke('najd:ws:documents', ...args),
+  documentSave: (...args) => ipcRenderer.invoke('najd:ws:documentSave', ...args),
+  documentRemove: (...args) => ipcRenderer.invoke('najd:ws:documentRemove', ...args),
+  onChanged: listener => wsListener('najd:workstation:changed', listener),
+  onTabs: listener => wsListener('najd:workstation:tabs', listener),
+  onRemote: listener => wsListener('najd:workstation:remote', listener)
+})
 contextBridge.exposeInMainWorld('najdLinks', { open: name => ipcRenderer.invoke('najd:links:open', name) })
 
 contextBridge.exposeInMainWorld('najdUnions', { get: () => ipcRenderer.invoke('najd:unions:get'), save: config => ipcRenderer.invoke('najd:unions:save', config) })
@@ -25,6 +76,7 @@ contextBridge.exposeInMainWorld('najdChannels', {
 // True when an automated run drives the window (remote debugging): the first-run welcome stays out of the way unless a test asks for it.
 contextBridge.exposeInMainWorld('najdAutomation', process.argv.includes('--najd-automation'))
 contextBridge.exposeInMainWorld('najdDiagnostics', { export: () => ipcRenderer.invoke('najd:diagnostics:export') })
+contextBridge.exposeInMainWorld('najdVoice', { status: () => ipcRenderer.invoke('najd:voice:status'), transcribe: (audio, mime, seconds) => ipcRenderer.invoke('najd:voice:transcribe', audio, mime, seconds) })
 
 // Window minimized/hidden state pushed by main (document visibility alone can stay "visible" when minimized).
 let windowHidden = false
@@ -59,7 +111,8 @@ contextBridge.exposeInMainWorld('najdAgent', {
   tools: () => ipcRenderer.invoke('najd:agent:tools'),
   profiles: () => ipcRenderer.invoke('najd:agent:profiles'),
   toolsets: () => ipcRenderer.invoke('najd:agent:toolsets'),
-  openOutput: (conversationId, filePath, mode) => ipcRenderer.invoke('najd:outputs:open', conversationId, filePath, mode)
+  openOutput: (conversationId, filePath, mode) => ipcRenderer.invoke('najd:outputs:open', conversationId, filePath, mode),
+  previewOutput: (conversationId, filePath) => ipcRenderer.invoke('najd:outputs:preview', conversationId, filePath)
 })
 
 // Knowledge bases (R-057): named collections of library documents NAJD searches and cites.
@@ -143,6 +196,7 @@ contextBridge.exposeInMainWorld('najdMcpServers', {
   add: input => ipcRenderer.invoke('najd:mcp-servers:add', input),
   remove: id => ipcRenderer.invoke('najd:mcp-servers:remove', id),
   connect: id => ipcRenderer.invoke('najd:mcp-servers:connect', id),
+  signIn: id => ipcRenderer.invoke('najd:mcp-servers:signin', id),
   disconnect: id => ipcRenderer.invoke('najd:mcp-servers:disconnect', id),
   pickCommand: () => ipcRenderer.invoke('najd:mcp-servers:pick-command'),
   programs: () => ipcRenderer.invoke('najd:mcp-servers:programs')
@@ -156,7 +210,7 @@ contextBridge.exposeInMainWorld('najdSkills', {
 })
 
 contextBridge.exposeInMainWorld('najdAppearance', {
-  setScale: scale => { if ([1, 1.15, 1.25].includes(scale)) webFrame.setZoomFactor(scale) }
+  setScale: scale => { if ([0.8, 0.9, 1, 1.1, 1.25, 1.5].includes(scale)) webFrame.setZoomFactor(scale) }
 })
 contextBridge.exposeInMainWorld('najdAbout', {
   notices: () => ipcRenderer.invoke('najd:about:notices')
@@ -165,7 +219,8 @@ contextBridge.exposeInMainWorld('najdAbout', {
 contextBridge.exposeInMainWorld('najdGateway', {
   status: () => ipcRenderer.invoke('najd:gateway:status'),
   start: () => ipcRenderer.invoke('najd:gateway:start'),
-  stop: () => ipcRenderer.invoke('najd:gateway:stop')
+  stop: () => ipcRenderer.invoke('najd:gateway:stop'),
+  repair: () => ipcRenderer.invoke('najd:gateway:repair')
 })
 
 contextBridge.exposeInMainWorld('najdCore', {
@@ -235,9 +290,12 @@ contextBridge.exposeInMainWorld('najdSessions', {
   create: () => ipcRenderer.invoke('najd:session:create'),
   append: (id, role, text, taskId, assetIds) => ipcRenderer.invoke('najd:session:append', id, role, text, taskId, assetIds),
   delete: id => ipcRenderer.invoke('najd:session:delete', id),
+  rename: (id, title) => ipcRenderer.invoke('najd:session:rename', id, title),
   export: id => ipcRenderer.invoke('najd:session:export', id),
   saveBlock: input => ipcRenderer.invoke('najd:session:saveBlock', input),
-  openFile: input => ipcRenderer.invoke('najd:session:openFile', input)
+  openFile: input => ipcRenderer.invoke('najd:session:openFile', input),
+  previewFile: input => ipcRenderer.invoke('najd:session:previewFile', input),
+  speak: (text, language) => ipcRenderer.invoke('najd:speech:synthesize', text, language)
 })
 
 contextBridge.exposeInMainWorld('najdAccounts', {
@@ -260,7 +318,16 @@ contextBridge.exposeInMainWorld('najdBrowser', {
     if (typeof listener !== 'function') return () => {}
     const handler = (_event, ask) => {
       if (!ask || typeof ask.id !== 'string' || !/^[a-f0-9]{24}$/.test(ask.id) || typeof ask.text !== 'string' || ask.text.length > 4000) return
-      listener({ id: ask.id, text: ask.text, page: ask.page && typeof ask.page === 'object' ? { url: String(ask.page.url || ''), title: String(ask.page.title || ''), selection: String(ask.page.selection || '') } : null })
+      const page = ask.page && typeof ask.page === 'object' ? ask.page : null
+      const attachment = page?.attachment && typeof page.attachment === 'object' ? { name: String(page.attachment.name || '').slice(0, 120), text: String(page.attachment.text || '').slice(0, 20000) } : null
+      const tabs = Array.isArray(page?.tabs) ? page.tabs.slice(0, 3).filter(tab => tab && typeof tab === 'object').map(tab => ({ url: String(tab.url || '').slice(0, 500), title: String(tab.title || '').slice(0, 200), text: String(tab.text || '').slice(0, 6000) })).filter(tab => tab.url) : []
+      listener({ id: ask.id, text: ask.text,
+        page: page ? { url: String(page.url || ''), title: String(page.title || ''), selection: String(page.selection || ''), text: String(page.text || '').slice(0, 12000), lang: String(page.lang || '').slice(0, 16), ...(attachment?.text ? { attachment } : {}), ...(tabs.length ? { tabs } : {}) } : null,
+        // A follow-up from the panel continues this conversation; a model chosen in the panel (checked against NAJD's own list by the bridge).
+        conversationId: typeof ask.conversationId === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(ask.conversationId) ? ask.conversationId : null,
+        // A picture of the page, already in NAJD's library (its id and name only).
+        pictures: Array.isArray(ask.pictures) ? ask.pictures.slice(0, 1).filter(item => item && typeof item.id === 'string' && /^[a-f0-9]{64}$/.test(item.id)).map(item => ({ id: item.id, name: String(item.name || 'page.jpg').slice(0, 120) })) : [],
+        model: ask.model && typeof ask.model === 'object' && typeof ask.model.provider === 'string' && typeof ask.model.model === 'string' ? { provider: ask.model.provider.slice(0, 40), model: ask.model.model.slice(0, 200) } : null })
     }
     ipcRenderer.on('najd:ask:incoming', handler)
     return () => { ipcRenderer.removeListener('najd:ask:incoming', handler) }

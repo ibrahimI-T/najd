@@ -86,3 +86,26 @@ test('an attached picture reaches any OpenAI-compatible model (owner request 202
   const parts = sent.messages.at(-1).content
   assert.deepEqual(parts[1], { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } })
 })
+
+test('a model whose server refuses pictures answers without them and is told to say so; later turns leave pictures out (R-083)', async () => {
+  const bodies = []
+  const client = createProviderClient('openai-compatible', { baseUrl: 'http://127.0.0.1:9/v1', fetchImpl: async (_url, options) => {
+    const body = JSON.parse(options.body)
+    bodies.push(body)
+    if (JSON.stringify(body).includes('image_url')) return new Response(JSON.stringify({ error: { message: 'image input is not supported - hint: if this is unexpected, you may need to provide the mmproj' } }), { status: 500 })
+    return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'This model cannot see pictures.' } }] })
+  } })
+  const input = [{ role: 'user', content: [{ type: 'input_text', text: 'NAJD_ATTACHMENT_DATA []' }, { type: 'input_image', image_url: 'data:image/png;base64,QUJD' }, { type: 'input_image', image_url: 'data:image/png;base64,REVG' }] }]
+  const result = await client.chat({ apiKey: 'test-key', modelName: 'text-only', history, agentTurn: { tools: [], input } })
+  assert.equal(result.kind, 'message')
+  assert.equal(bodies.length, 2)
+  const retried = JSON.stringify(bodies[1])
+  assert.equal(retried.includes('image_url'), false)
+  assert.match(retried, /attached 2 picture\(s\), but the selected model cannot see pictures/)
+  await client.chat({ apiKey: 'test-key', modelName: 'text-only', history, agentTurn: { tools: [], input } })
+  assert.equal(bodies.length, 3, 'the next turn goes out without pictures at once')
+  assert.equal(JSON.stringify(bodies[2]).includes('image_url'), false)
+  // Another refusal reason is not mistaken for a picture refusal.
+  const other = createProviderClient('openai-compatible', { baseUrl: 'http://127.0.0.1:9/v1', fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'model not loaded' } }), { status: 500 }) })
+  await assert.rejects(other.chat({ apiKey: 'test-key', modelName: 'x', history, agentTurn: { tools: [], input } }), { code: 'PROVIDER_REJECTED' })
+})

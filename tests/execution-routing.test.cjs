@@ -88,3 +88,30 @@ test('a tool call NAJD cannot use is answered with directions and the task goes 
   assert.deepEqual(outputs.map(output => output.error || output.status), ['ARGUMENTS_TOO_LONG', 'INVALID_ARGUMENTS', 'UNKNOWN_TOOL', 'written'])
   assert.equal(done.text, 'done')
 })
+
+test('the receipt counts calls identical to an earlier call of the run, and does not limit them', async () => {
+  const workspace = { describe: () => ({ workspace: 'C:/w', grantedFolders: [] }), run: async () => ({ status: 'written', path: 'C:/w/a.txt' }) }
+  const runtime = createAgentRuntime({ ...base, workspace })
+  const call = (path, id) => ({ kind: 'agent-tools', calls: [{ name: 'najd_files_write', arguments: JSON.stringify({ path, content: 'x' }), call_id: id }], items: [] })
+  const queue = [call('a.txt', '1'), call('a.txt', '2'), call('b.txt', '3'), call('a.txt', '4')]
+  const done = await runtime.run({ request: { text: 'Create files', conversationId: 'repeats' }, requestApproval: async () => 'ALLOW_ONCE', respond: async () => queue.shift() || { kind: 'message', text: 'done' } })
+  assert.equal(done.receipt.repeatedCalls, 2, 'the second and fourth calls repeat the first')
+  assert.equal(done.receipt.toolCalls, 4, 'all four ran')
+  const plain = createAgentRuntime({ ...base, workspace })
+  const single = [call('c.txt', '1')]
+  const once = await plain.run({ request: { text: 'Create c', conversationId: 'once' }, requestApproval: async () => 'ALLOW_ONCE', respond: async () => single.shift() || { kind: 'message', text: 'done' } })
+  assert.equal('repeatedCalls' in once.receipt, false)
+})
+
+test('every guide the instructions tell the model to read exists in the active workstation skill layer (R-070)', () => {
+  const fsSync = require('node:fs'), pathSync = require('node:path')
+  const source = fsSync.readFileSync(pathSync.join(__dirname, '..', 'electron', 'agent-runtime.cjs'), 'utf8')
+  const named = [...source.matchAll(/read the (najd-[a-z0-9-]+) guide/g)].map(match => match[1])
+  assert.ok(named.includes('najd-office-design'), 'the office instructions name a guide')
+  for (const id of new Set(named)) assert.ok(fsSync.existsSync(pathSync.join(__dirname, '..', 'electron', 'workstation', 'skills', id + '.md')), id + ' is served to the model (the active layer is electron/workstation/skills)')
+})
+
+test('a running Office review step says it can take a few minutes', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'electron', 'agent-runtime.cjs'), 'utf8')
+  assert.match(source, /office\.review'\) return clip\(args\.path\) \+ ' · ≤ 3 min'/)
+})

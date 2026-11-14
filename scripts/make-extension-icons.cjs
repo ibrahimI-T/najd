@@ -6,7 +6,7 @@ const fs = require('node:fs'), path = require('node:path')
 app.whenReady().then(() => {
   const source = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.png'))
   if (source.isEmpty()) { console.error('build/icon.png is missing or unreadable'); app.exit(1); return }
-  const target = path.join(__dirname, '..', 'browser-extension', 'icons')
+  const target = path.join(__dirname, '..', 'browser-extension-v2', 'icons')
   fs.mkdirSync(target, { recursive: true })
   for (const size of [16, 32, 48, 128]) {
     const image = source.resize({ width: size, height: size, quality: 'best' })

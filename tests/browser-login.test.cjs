@@ -311,3 +311,53 @@ test('R064-REV-01: the saved password is only sent to the account\'s own site ov
   good.site.page = { ...loginPage(good.host), elements: [field('e1', 'Email', { type: 'email' }), field('e2', 'Password', { type: 'password', sensitive: true, formAction: `https://${good.host}/session`, form: 'Sign in', formKey: 'k' }), { id: 'e3', role: 'button', label: 'Sign in', submits: true }] }
   assert.equal((await good.run({ action: 'login', target: goodAccount.id })).status, 'signed_in')
 })
+
+test('a two-step sign-in (email first, then password, as Microsoft and Google do) is guided and completed', async () => {
+  const f = fixture({ host: 'login.example.com' }); const account = await add(f)
+  const emailPage = { url: 'https://login.example.com/login', title: 'Sign in', text: 'Sign in to continue', scroll: { y: 0 },
+    elements: [field('u1', 'Email, phone, or Skype', { type: 'email' }), { id: 'b1', role: 'button', label: 'Next' }, { id: 'l1', role: 'link', label: 'Create one!' }] }
+  f.site.page = emailPage
+  const read = await f.run({ action: 'read' })
+  assert.equal(read.page.login.step, 'username')
+  assert.deepEqual([read.page.login.field, read.page.login.next, read.page.login.accounts[0].username], ['u1', 'b1', 'tester@example.com'])
+  // Calling login on the email page explains the step instead of refusing the page as "not a sign-in form".
+  const early = await f.run({ action: 'login', target: account.id, submit: true })
+  assert.deepEqual([early.status, early.field, early.next, early.username], ['username_step', 'u1', 'b1', 'tester@example.com'])
+  assert.equal(f.site.checks, 0, 'no password was sent on the email step')
+  // After the email step, the password page signs in as usual.
+  f.site.page = loginPage('login.example.com')
+  const done = await f.run({ action: 'login', target: account.id, submit: true })
+  assert.equal(done.status, 'signed_in')
+  assert.ok(!leaks([read, early, done, f.approvals]))
+  // A registration page is never mistaken for an email step.
+  f.site.page = { ...emailPage, url: 'https://login.example.com/signup', title: 'Create account' }
+  assert.equal((await f.run({ action: 'read' })).page.login, undefined)
+})
+
+test('a sign-in whose answer is lost when the page moves on is judged from the page the tab is on (owner\'s Microsoft account)', async () => {
+  const f = fixture(); const account = await add(f)
+  await f.run({ action: 'open', target: `https://${f.host}/login` })
+  // The extension's answer is lost while the form submits and the tab moves to the signed-in page.
+  const original = f.tools
+  const lost = Object.assign(new Error('BROWSER_ACTION_UNKNOWN'), { code: 'BROWSER_ACTION_UNKNOWN' })
+  const realCommand = f.site.commands.push.bind(f.site.commands)
+  let moved = false
+  const bridgeCommand = async (kind, args) => {
+    realCommand({ kind, args: JSON.parse(JSON.stringify(args)) })
+    if (kind === 'login') { f.site.checks++; if (args.password === PASSWORD) { f.site.sessionValid = true; f.site.page = accountPage(f.host); moved = true } throw lost }
+    return JSON.parse(JSON.stringify(f.site.page))
+  }
+  const { createBrowserTools } = require('../electron/browser-tools.cjs')
+  const tools = createBrowserTools({ bridge: { status: () => ({ connected: true, page: f.site.page }), lastPage: () => f.site.page, command: bridgeCommand }, vault: f.vault })
+  const run = args => tools.run({ action: '', target: '', text: '', submit: false, ...args }, { requestApproval: f.requestApproval('ALLOW_ONCE') })
+  const signed = await run({ action: 'login', target: account.id, submit: true })
+  assert.ok(moved)
+  assert.equal(signed.status, 'signed_in', 'the page after the move shows the sign-in went through')
+  // When the page after the lost answer is still the sign-in form, it counts as not completed (and toward the pause).
+  f.site.page = loginPage(f.host)
+  const wrong = await createBrowserTools({ bridge: { status: () => ({ connected: true, page: f.site.page }), lastPage: () => f.site.page, command: async kind => { if (kind === 'login') throw lost; return JSON.parse(JSON.stringify(f.site.page)) } }, vault: f.vault })
+    .run({ action: 'login', target: account.id, text: '', submit: true }, { requestApproval: f.requestApproval('ALLOW_ONCE') })
+  assert.equal(wrong.status, 'login_not_completed')
+  assert.ok(!leaks([signed, wrong]))
+  void original
+})

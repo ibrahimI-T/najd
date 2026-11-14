@@ -27,7 +27,7 @@ async function main() {
       assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails))
       return result.result.value
     }
-    await run(`(async()=>{await window.najdProviders.saveKey('openai-api','sk-najd-API-TEST-KEY');const l=await window.najdProviders.limits();await window.najdProviders.setLimits({...l.policy,maxOutputTokens:1024,maxCloudAttempts:40})})()`)
+    await run(`(async()=>{await window.najdProviders.saveKey('openai-api','sk-najd-API-TEST-KEY');const l=await window.najdProviders.limits();await window.najdProviders.setLimits({...l.policy,maxCloudAttempts:40})})()`)
     // decisions: answers for each approval, in order ('ALLOW_ONCE' or 'DENY'); cancelAt: cancel at that approval.
     async function chat(conversationId, decisions, cancelAt = -1) {
       const text = 'python csv fixture: احسب مجموع الأرقام في data.csv باستخدام بايثون'
@@ -45,7 +45,8 @@ async function main() {
       return { task: await run(`window.najdCore.getTask(${JSON.stringify(task.id)})`), tools }
     }
     const done = await chat('e2e-sum', ['ALLOW_ONCE', 'ALLOW_ONCE'])
-    assert.equal(done.task.state, 'COMPLETED', JSON.stringify({ code: done.task.errorCode, tools: done.tools, steps: done.task.steps?.slice?.(-4), state: done.task.state }).slice(0, 3000))
+    const fixtureErrors = await fs.readFile(path.join(root, 'fixture-errors.log'), 'utf8').catch(() => '')
+    assert.equal(done.task.state, 'COMPLETED', JSON.stringify({ code: done.task.errorCode, tools: done.tools, steps: done.task.steps?.slice?.(-4), state: done.task.state, fixtureErrors }).slice(0, 3000))
     assert.equal(done.task.output, 'The total is 10.')
     assert.deepEqual(done.tools, ['najd-files-write', 'najd-python-run'])
     assert.equal(done.task.receipt.profile, 'coding')

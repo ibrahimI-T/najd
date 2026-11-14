@@ -29,10 +29,10 @@ async function main(){
       if(t.state!=='WAITING_APPROVAL')throw Error('Missing read approval');
       return t.id
     })()`)
+    // Vue renderer (B-003): the activity of a finished run is the folded `.a-box[data-activity=done]` under its answer.
     await client.send('Page.reload')
-    await waitFor(async()=>await evaluate(client,'!!document.querySelector(".task-duration")'))
-    assert.equal(await evaluate(client,'document.querySelectorAll(".task-activity").length'),0)
-    assert.equal(await evaluate(client,'getComputedStyle(document.querySelector(".task-duration")).borderBottomWidth'),'0px')
+    await waitFor(async()=>await evaluate(client,'document.querySelector("[data-shell=workstation]")?.dataset.renderer === "vue" && !!document.querySelector("#prompt")'),60000)
+    assert.equal(await evaluate(client,'document.querySelectorAll(".a-box").length'),0,'nothing is shown before a conversation is opened')
     const tasks=await run(`window.najdSessions.list()`)
     const sessionId=tasks[0].id
     const result=await run(`(async()=>{
@@ -58,18 +58,24 @@ async function main(){
     assert.ok(skill.events.some(e=>e.skill==='najd-read-document'))
     assert.equal(skill.events.some(e=>e.type==='tool.started'),false)
     await stop(instance);instance=await launch(root);client=instance.client
-    await waitFor(async()=>await evaluate(client,'!!document.querySelector(".task-activity")'))
-    await click(client,'.task-activity .act-toggle')
-    assert.equal(await evaluate(client,'document.querySelector(".task-activity .act-toggle").getAttribute("aria-expanded")'),'true')
-    assert.equal(await evaluate(client,'!!document.querySelector(".task-activity .act-row.kind-file-read")'),true)
-    await click(client,'.task-activity .act-row.kind-file-read .act-line')
-    assert.equal(await evaluate(client,'document.querySelector(".task-activity").textContent.includes("read-file")'),true)
-    assert.equal(await evaluate(client,'document.querySelector(".task-activity").textContent.includes("OWNED-FIXTURE-BODY")'),false)
+    await waitFor(async()=>await evaluate(client,'document.querySelector("[data-shell=workstation]")?.dataset.renderer === "vue" && !!document.querySelector(".n-session .n-row")'),60000)
+    await click(client,'.n-session .n-row')
+    await waitFor(async()=>await evaluate(client,'document.querySelectorAll(".a-box").length>=2'))
+    // The plain answer has no steps; the approved read and the denied skill each have a folded timeline with a summary line.
+    assert.equal(await evaluate(client,'[...document.querySelectorAll(".a-box")].every(box=>box.dataset.activity==="done")'),true)
+    assert.equal(await evaluate(client,'[...document.querySelectorAll(".a-box .a-head")].every(head=>head.getAttribute("aria-expanded")==="false")'),true,'finished runs are folded')
+    const heads=await evaluate(client,'[...document.querySelectorAll(".a-box .a-head")].map(head=>head.textContent)')
+    assert.ok(heads.length>=2,'two timelines: '+JSON.stringify(heads))
+    for(let index=0;index<heads.length;index++){
+      await evaluate(client,`document.querySelectorAll(".a-box .a-head")[${index}].click()`)
+      await waitFor(async()=>await evaluate(client,`document.querySelectorAll(".a-box")[${index}].querySelectorAll(".a-step").length>0`))
+    }
+    const text=await evaluate(client,'[...document.querySelectorAll(".a-box")].map(box=>box.textContent).join(" | ")')
+    assert.match(text,/read/i,'the approved read step is listed: '+text)
+    assert.equal(text.includes('OWNED-FIXTURE-BODY'),false,'the file body is not in the timeline')
     const history=JSON.parse(await fs.readFile(path.join(root,'najd-data','sessions.json'),'utf8'))
     assert.ok(history.sessions[0].messages.some(m=>m.activity?.events.some(e=>e.type==='tool.completed')))
-    const output=path.resolve('release/qa-activity-'+require('../package.json').version);await fs.mkdir(output,{recursive:true})
-    const shot=await client.send('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(output,'tool-history.png'),Buffer.from(shot.data,'base64'))
-    console.log('PASS: plain response duration; actual approved tool and denied skill timelines survive full process restart, remain expandable and exclude file bodies.')
+    console.log('PASS (Vue): the approved tool and the denied skill timelines survive a full process restart, are folded, expand to their steps and exclude file bodies.')
   }finally{
     if(instance)await stop(instance)
     if(!path.resolve(root).startsWith(path.resolve(os.tmpdir())+path.sep)||!path.basename(root).startsWith('najd-desktop-test-'))throw Error('Unsafe cleanup')

@@ -27,7 +27,7 @@ test('a local server on a 16k window is lean before the first run, with no model
     chatGPT: { status: async () => ({ signedIn: false }) }, ollama: { listModels: async () => [] }, clientFactory: () => ({ listModels: async () => [{ id: 'qwen3-35b', label: 'qwen3-35b' }], chat: async () => ({ kind: 'message', text: 'x' }) }),
     localFetch: async url => (String(url).endsWith('/props') ? new Response(JSON.stringify({ default_generation_settings: { n_ctx: 16384 } })) : new Response('{}', { status: 404 })) })
   t.after(() => service.dispose())
-  assert.equal(tierOf(service.inputBudget('llamacpp', 'qwen3-35b')).lean, false, 'unknown window: the full setup')
+  assert.equal(service.inputBudget('llamacpp', 'qwen3-35b'), 8192 * 3, 'unknown local window: a conservative 8K estimate until the server is read (R-082)')
   await service.ensureWindow('llamacpp', 'qwen3-35b')
   assert.equal(service.inputBudget('llamacpp', 'qwen3-35b'), 16384 * 3)
   assert.equal(tierOf(service.inputBudget('llamacpp', 'qwen3-35b')).lean, true)
@@ -134,7 +134,7 @@ test('a server that reports its window only in its model list (vLLM) is read at 
     clientFactory: () => ({ listModels: async () => [{ id: 'm', label: 'm', contextWindow: listed }], chat: async () => ({ kind: 'message', text: 'x' }) }),
     localFetch: async () => new Response('{}', { status: 404 }) })
   t.after(() => service.dispose())
-  assert.equal(service.inputBudget('vllm', 'm'), 64000 * 3, 'nothing is known before the first run')
+  assert.equal(service.inputBudget('vllm', 'm'), 8192 * 3, 'nothing is known before the first run: the local estimate')
   await service.ensureWindow('vllm', 'm')
   assert.equal(service.inputBudget('vllm', 'm'), 8192 * 3, 'the first run learns the window from the model list without anyone opening it')
   listed = 4096
@@ -159,7 +159,7 @@ test('a local server that asks for a key is probed with the saved key, and only 
   const service = await makeService(t, { clientFactory: () => ({ listModels: async () => [{ id: 'q', label: 'q' }], chat: async () => ({ kind: 'message', text: 'x' }) }),
     localFetch: async (url, init) => { seen.push(init?.headers?.authorization || null); return init?.headers?.authorization === 'Bearer local-secret-key' && String(url).endsWith('/props') ? new Response(JSON.stringify({ default_generation_settings: { n_ctx: 16384 } })) : new Response('{}', { status: 401 }) } })
   await service.ensureWindow('llamacpp', 'q')
-  assert.equal(service.inputBudget('llamacpp', 'q'), 64000 * 3, 'without a saved key the server refuses and nothing is learned')
+  assert.equal(service.inputBudget('llamacpp', 'q'), 8192 * 3, 'without a saved key the server refuses and nothing is learned')
   await service.saveKey('llamacpp', 'local-secret-key')
   const clock = Date.now
   Date.now = () => clock() + 120000
@@ -178,7 +178,7 @@ test('an address change while the model-list fallback is pending leaves no fresh
   await new Promise(resolve => setTimeout(resolve, 30))
   await service.setEndpoint('vllm', 'http://127.0.0.1:8124/v1')
   release(); await first
-  assert.equal(service.inputBudget('vllm', 'm'), 64000 * 3, 'the answer of the old address was not published')
+  assert.equal(service.inputBudget('vllm', 'm'), 8192 * 3, 'the answer of the old address was not published')
   await service.ensureWindow('vllm', 'm')
   assert.equal(service.inputBudget('vllm', 'm'), 4096 * 3, 'and the next run asked the new address at once')
 })
@@ -202,11 +202,11 @@ test('changing or clearing the key forgets the window at once, and an answer tha
   await new Promise(resolve => setTimeout(resolve, 30))
   await service.saveKey('llamacpp', 'second-local-key')
   release(); await slow
-  assert.equal(service.inputBudget('llamacpp', 'q'), 64000 * 3, 'the answer given under the old key was not published')
+  assert.equal(service.inputBudget('llamacpp', 'q'), 8192 * 3, 'the answer given under the old key was not published')
   await service.ensureWindow('llamacpp', 'q')
   assert.equal(service.inputBudget('llamacpp', 'q'), 16384 * 3)
   await service.clearKey('llamacpp')
-  assert.equal(service.inputBudget('llamacpp', 'q'), 64000 * 3, 'clearing the key forgets what was learned with it, immediately')
+  assert.equal(service.inputBudget('llamacpp', 'q'), 8192 * 3, 'clearing the key forgets what was learned with it, immediately')
 })
 
 test('model names that are also names of inherited properties never become a window', async t => {
@@ -216,8 +216,23 @@ test('model names that are also names of inherited properties never become a win
   for (const name of names) {
     await service.ensureWindow('lmstudio', name)
     const budget = service.inputBudget('lmstudio', name)
-    assert.ok(Number.isFinite(budget) && budget === 64000 * 3, name + ': a plain unknown window, never a function')
+    assert.ok(Number.isFinite(budget) && budget === 8192 * 3, name + ': a plain unknown window, never a function')
   }
   const listed = await service.models('lmstudio')
   assert.ok(listed.every(model => model.contextWindow === null || Number.isFinite(model.contextWindow)), 'what crosses to the window is always a number or null')
+})
+
+test('Ollama behind its OpenAI-compatible API and KoboldCpp report their running windows; an unknown local window is a small estimate', async t => {
+  const answers = { '/api/version': { version: '0.13.0' }, '/api/ps': { models: [{ name: 'qwen3.5:4b', context_length: 4096 }] } }
+  const ollamaLike = await detectLocalWindow({ baseUrl: 'http://127.0.0.1:11434/v1', fetchImpl: async url => { const route = new URL(url).pathname; return route in answers ? new Response(JSON.stringify(answers[route])) : new Response('404', { status: 404 }) } })
+  assert.deepEqual({ ...ollamaLike, models: { ...ollamaLike.models } }, { default: 4096, models: { 'qwen3.5:4b': 4096 } })
+  const kobold = await detectLocalWindow({ baseUrl: 'http://127.0.0.1:5001/v1', fetchImpl: async url => String(url).endsWith('/api/extra/true_max_context_length') ? new Response('{"value": 12288}') : new Response('404', { status: 404 }) })
+  assert.equal(kobold.default, 12288)
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-window-unknown-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const service = createProviderService({ directory: root, encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString() }) },
+    chatGPT: { status: async () => ({ signedIn: false }) }, ollama: { listModels: async () => [] }, clientFactory: () => ({ listModels: async () => [{ id: 'm', label: 'm' }], chat: async () => ({ kind: 'message', text: 'x' }) }),
+    localFetch: async () => new Response('{}', { status: 404 }) })
+  t.after(() => service.dispose())
+  assert.equal(service.inputBudget('jan', 'm'), 8192 * 3, 'a local server that says nothing: 8K, not the 64K assumed for unknown cloud models')
 })

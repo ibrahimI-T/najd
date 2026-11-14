@@ -74,6 +74,7 @@ test('search, open, read and links run directly; buttons and typing need approva
   } })
   assert.equal(outputs[0].status, 'searched'); assert.match(outputs[0].page.elements[0], /e1 link "Najd Lamp – Shop" → https:\/\/shop.example\/lamp/)
   assert.equal(outputs[1].status, 'clicked'); assert.match(outputs[1].page.text, /149 SAR/)
+  assert.equal(typeof outputs[1].navigated, 'boolean', 'a press says whether the address changed'); if (outputs[1].navigated === false) assert.match(outputs[1].note, /did not change/)
   assert.equal(outputs[2].status, 'denied_by_user')
   assert.equal(outputs[3].status, 'clicked'); assert.equal(outputs[3].page.title, 'Sign up')
   assert.equal(outputs[4].status, 'typed')
@@ -365,4 +366,80 @@ test('a page address that reached the bridge cap flags every approval as shown o
   const tools = createBrowserTools({ bridge: { status: () => ({ connected: true }), lastPage: () => page, pageToken: () => 't#1', async command() { return page } } })
   await tools.run({ action: 'click', target: 'e1', text: '', submit: false }, { requestApproval: async (tool, input) => { seen.push(input); return 'DENY' } })
   assert.equal(seen[0].truncated, true)
+})
+
+// Reading long pages (owner request 2026-11-14: "like the Kimi extension"): the page text was cut at 8,000 characters with no way to see the rest.
+function stubTools(pagesByKind) {
+  const received = []
+  const bridge = {
+    status: () => ({ connected: true, page: null }), lastPage: () => null, lastBrowser: () => null, pageToken: () => null, forgetPage: () => {},
+    command: async (kind, args) => { received.push(kind); const value = pagesByKind[kind]; return typeof value === 'function' ? value(args) : value }
+  }
+  return { tools: createBrowserTools({ bridge }), received }
+}
+const LONG = Array.from({ length: 40 }, (_, i) => 'Section ' + i + ' ' + 'x'.repeat(600)).join('\n')
+
+test('a long page is read in windows: textLength and moreTextFrom say what is left, and read with offset continues', async () => {
+  const { tools } = stubTools({ read: { url: 'https://shop.example/long', title: 'Long', text: LONG, elements: [] } })
+  const first = (await tools.run({ action: 'read', target: '', text: '', submit: false, browser: '' }, {})).page
+  assert.equal(first.text.length, 12000)
+  assert.equal(first.textOffset, 0); assert.ok(first.textLength > 20000); assert.equal(first.moreTextFrom, 12000)
+  const next = (await tools.run({ action: 'read', target: 'offset:12000', text: '', submit: false, browser: '' }, {})).page
+  assert.equal(next.textOffset, 12000); assert.ok(next.text.startsWith(first.text ? LONG.replace(/\s+/g, ' ').slice(12000, 12020) : ''))
+  const last = (await tools.run({ action: 'read', target: '30000', text: '', submit: false, browser: '' }, {})).page
+  assert.equal(last.moreTextFrom, undefined, 'the end carries no continuation')
+})
+
+test('find says where a phrase occurs (case, spacing and Arabic marks ignored) with the text around it', async () => {
+  const { tools } = stubTools({ read: { url: 'https://shop.example/a', title: 'A', text: 'سعر   الذَّهب اليوم 490 ريال.\nPrice of GOLD today.\nGold again', elements: [] } })
+  const latin = await tools.run({ action: 'find', target: '', text: 'gold', submit: false, browser: '' }, {})
+  assert.equal(latin.status, 'found'); assert.equal(latin.count, 2)
+  assert.ok(latin.matches[0].around.includes('GOLD')); assert.ok(latin.matches[0].offset > 0)
+  const arabic = await tools.run({ action: 'find', target: '', text: 'الذهب', submit: false, browser: '' }, {})
+  assert.equal(arabic.count, 1, 'the diacritics on the page do not hide the match')
+  const none = await tools.run({ action: 'find', target: '', text: 'nothing like this', submit: false, browser: '' }, {})
+  assert.equal(none.count, 0)
+})
+
+test('skim collects a long page screen by screen in one step and stops at the bottom; a feed that keeps growing is reported as endless', async () => {
+  let screen = 0
+  const { tools, received } = stubTools({
+    read: { url: 'https://shop.example/long', title: 'Long', text: 'Top\nIntro', elements: [] },
+    scroll: () => { screen++; return { url: 'https://shop.example/long', title: 'Long', text: screen <= 3 ? 'Top\nIntro\nBlock ' + screen + ' ' + 'y'.repeat(200) : 'Top\nIntro\nBlock 3 ' + 'y'.repeat(200), elements: [] } }
+  })
+  const done = await tools.run({ action: 'skim', target: '', text: '', submit: false, browser: '' }, {})
+  assert.equal(done.status, 'skimmed'); assert.equal(done.complete, true); assert.equal(done.endless, false)
+  assert.ok(done.text.includes('Block 1') && done.text.includes('Block 3')); assert.equal(done.text.split('Top').length, 2, 'each line once')
+  assert.equal(received.filter(kind => kind === 'scroll').length, 5, '3 screens of new text, then 2 without: stops')
+  let n = 0
+  const feed = stubTools({ read: { url: 'https://feed.example', title: 'Feed', text: 'a', elements: [] }, scroll: () => ({ url: 'https://feed.example', title: 'Feed', text: 'item ' + (++n) + ' ' + 'z'.repeat(100), elements: [] }) })
+  const endless = await feed.tools.run({ action: 'skim', target: '', text: '', submit: false, browser: '' }, {})
+  assert.equal(endless.endless, true); assert.equal(endless.complete, false); assert.equal(endless.screens, 8)
+})
+
+test('tabs lists the linked browser tabs with who owns them', async () => {
+  const { tools } = stubTools({ list_tabs: { tabs: [{ title: 'NAJD tab', url: 'https://a.example/', active: true, ownership: 'owned', current: true }, { title: 'Mail', url: 'https://mail.example/', active: false, ownership: 'other', current: false }] } })
+  const result = await tools.run({ action: 'tabs', target: '', text: '', submit: false, browser: '' }, {})
+  assert.equal(result.status, 'tabs'); assert.deepEqual(result.tabs.map(tab => [tab.title, tab.ownership]), [['NAJD tab', 'owned'], ['Mail', 'other']])
+})
+
+test('the same element pressed on a page that does not change is refused on the third try (owner Outlook sign-in loop, 2026-11-14)', async () => {
+  const page = { url: 'https://www.microsoft.com/outlook', title: 'Outlook', text: 'Sign in', elements: [{ id: 'e20', role: 'link', label: 'Sign in', href: 'https://login.live.com/' }] }
+  let last = page
+  const bridge = {
+    status: () => ({ connected: true, page: null }), lastPage: () => last, lastBrowser: () => null, pageToken: () => null, forgetPage: () => {},
+    command: async kind => { last = page; return page }
+  }
+  const tools = createBrowserTools({ bridge })
+  const signal = new AbortController().signal
+  const press = () => tools.run({ action: 'click', target: 'e20', text: '', submit: false, browser: '' }, { signal, requestApproval: async () => 'ALLOW_ONCE' })
+  const first = await press()
+  assert.equal(first.status, 'clicked'); assert.equal(first.navigated, false)
+  const second = await press()
+  assert.match(second.note, /Pressed twice/)
+  const third = await press()
+  assert.equal(third.status, 'repeat_refused', 'not pressed a third time')
+  // Another task starts fresh.
+  const other = await tools.run({ action: 'click', target: 'e20', text: '', submit: false, browser: '' }, { signal: new AbortController().signal, requestApproval: async () => 'ALLOW_ONCE' })
+  assert.equal(other.status, 'clicked')
 })

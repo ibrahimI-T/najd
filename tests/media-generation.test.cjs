@@ -105,3 +105,18 @@ test('a prompt longer than its approval preview is flagged as shown only in part
   await media.generateImage({ prompt: 'A castle', size: '1024x1024' }, { requestApproval: async (tool, input) => { short.push(input); return 'DENY' } })
   assert.equal(short[0].truncated, false)
 })
+
+test('voice input: the owner\'s recording is transcribed with their key, with no approval card; bad input and no key are refused (R-080)', async () => {
+  const sent = []
+  const fetchImpl = async (url, init) => { sent.push({ url: String(url), auth: init.headers.Authorization, file: init.body.get('file'), model: init.body.get('model') }); return new Response(JSON.stringify({ text: '  مرحبا نجد  ' })) }
+  const media = createMediaGeneration({ getOpenAIKey: async () => 'sk-user-own-key', workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'najd-voice-')), fetchImpl, saveToLibrary: async () => null })
+  const audio = Buffer.alloc(4000, 1)
+  assert.deepEqual(await media.dictate({ audio, mime: 'audio/webm;codecs=opus', seconds: 3 }), { text: 'مرحبا نجد' })
+  assert.equal(sent[0].url, 'https://api.openai.com/v1/audio/transcriptions'); assert.equal(sent[0].auth, 'Bearer sk-user-own-key'); assert.equal(sent[0].model, 'gpt-4o-mini-transcribe'); assert.equal(sent[0].file.name, 'voice.webm')
+  await assert.rejects(media.dictate({ audio, mime: 'video/mp4', seconds: 3 }), { code: 'INVALID_INPUT' })
+  await assert.rejects(media.dictate({ audio, mime: 'audio/webm', seconds: 400 }), { code: 'INVALID_INPUT' })
+  await assert.rejects(media.dictate({ audio: Buffer.alloc(10), mime: 'audio/webm', seconds: 1 }), { code: 'INVALID_INPUT' })
+  const keyless = createMediaGeneration({ getOpenAIKey: async () => null, workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'najd-voice-')), fetchImpl, saveToLibrary: async () => null })
+  await assert.rejects(keyless.dictate({ audio, mime: 'audio/webm', seconds: 2 }), { code: 'SERVICE_NOT_CONFIGURED' })
+  assert.equal(sent.length, 1)
+})

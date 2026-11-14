@@ -4,7 +4,7 @@
 !macro customInstall
   ; Unpacked components live in %LOCALAPPDATA%\NAJD AGENT\runtime; count them in "Space required".
   ; Sum of components[].bytes in build/bundle/najd-runtime-packed/bundle.json, in KB (checked by tests).
-  AddSize 1124884
+  AddSize 1366927
   DetailPrint "Preparing NAJD components (this can take a few minutes)..."
   najd_prepare:
   ${if} ${Silent}

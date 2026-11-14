@@ -62,7 +62,8 @@ async function main() {
     // The host itself refuses sensitive fields, even when called directly with the live attributes.
     await assert.rejects(act(card, 'setValue', '4111111111111111'), { code: 'SENSITIVE_FIELD' })
     await assert.rejects(act(secret, 'setValue', 'hunter2'), { code: 'SENSITIVE_FIELD' })
-    await act(submit, 'invoke')
+    const pressed = await act(submit, 'invoke')
+    assert.ok(Number.isFinite(pressed.at?.x) && Number.isFinite(pressed.at?.y), 'a press reports where the pointer went (for the on-screen ring): ' + JSON.stringify(pressed))
     let after
     for (let i = 0; i < 20; i++) { after = (await read()).find(item => item.name === 'Submitted: NAJD test' || item.value === 'Submitted: NAJD test'); if (after) break; await sleep(150) }
     assert.ok(after, 'button result visible after re-reading')
@@ -177,13 +178,13 @@ $form.Controls.AddRange(@($press, $arm))
     wide = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', `
 Add-Type -AssemblyName System.Windows.Forms
 $form = New-Object System.Windows.Forms.Form; $form.Text = '${wideTitle}'; $form.Width = 900; $form.Height = 700; $form.AutoScroll = $true
-for ($i = 0; $i -lt 320; $i++) { $b = New-Object System.Windows.Forms.Button; $b.Text = 'Button ' + $i; $b.Top = 10 + [Math]::Floor($i / 8) * 30; $b.Left = 10 + ($i % 8) * 105; $b.Width = 100; $form.Controls.Add($b) }
+for ($i = 0; $i -lt 900; $i++) { $b = New-Object System.Windows.Forms.Button; $b.Text = 'Button ' + $i; $b.Top = 10 + [Math]::Floor($i / 8) * 30; $b.Left = 10 + ($i % 8) * 105; $b.Width = 100; $form.Controls.Add($b) }
 [System.Windows.Forms.Application]::Run($form)`], { windowsHide: false, stdio: 'ignore' })
     let wideWindow
     for (let i = 0; i < 75 && !wideWindow; i++) { await sleep(200); wideWindow = (await node.invokeHost('najd.desktop.windows', {})).find(item => item.title === wideTitle) }
     assert.ok(wideWindow, 'wide fixture listed')
     const wideRead = await node.invokeHost('najd.desktop.read', { window: wideWindow.window, pid: wideWindow.pid, created: wideWindow.created, title: wideTitle }, 60000)
-    assert.equal(wideRead.complete, false, 'more than the host reads'); assert.ok(wideRead.elements.length <= 300)
+    assert.equal(wideRead.complete, false, 'more than the host reads'); assert.ok(wideRead.elements.length <= 800)
     console.log('Desktop host smoke passed: list, read, type, sensitive refusal in the host (labelled and unlabeled), press and verify, stale targets, window screenshot.')
   } finally {
     await node.stop().catch(() => {})

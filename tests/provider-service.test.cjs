@@ -139,6 +139,15 @@ test('listed models carry their context window and runs can look it up', async t
   assert.deepEqual((await service.models('openai-api')).map(m => m.contextWindow), [400000, null, null])
   assert.equal(service.contextWindow('openai-api', 'big'), 400000)
   assert.equal(service.contextWindow('kimi-code', 'k3-256k'), 256000)
-  assert.equal((await service.models('ollama'))[0].contextWindow, 16384)
-  assert.equal(service.contextWindow('ollama', 'anything'), 16384)
+  // An Ollama client that cannot report a window: a conservative estimate, marked as such (never an assumed 16K).
+  const [qwen] = await service.models('ollama')
+  assert.deepEqual([qwen.contextWindow, qwen.contextSource, qwen.contextEstimated], [8192, 'fallback', true])
+  assert.equal(service.contextWindow('ollama', 'anything'), 8192)
+  // One that reads it from Ollama: the model's real window, used for its runs.
+  const detected = createProviderService({ directory: root, encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: bytes.toString() }) },
+    chatGPT: { status: async () => ({ signedIn: false }) }, ollama: { listModels: async () => ['big'], contextWindow: async () => ({ window: 32768, source: 'model', estimated: false }) } })
+  t.after(() => detected.dispose?.())
+  assert.deepEqual((await detected.models('ollama')).map(m => [m.contextWindow, m.contextSource, m.contextEstimated]), [[32768, 'model', false]])
+  await detected.ensureWindow('ollama', 'big')
+  assert.equal(detected.contextWindow('ollama', 'big'), 32768)
 })

@@ -15,10 +15,14 @@ const { readTool } = require('./model-file-tool.cjs')
 const { modelWindow, validWindow } = require('./model-window.cjs')
 const { modelGuidancePrompt } = require('./model-guidance.cjs')
 const { detectLocalWindow } = require('./local-window.cjs')
-const OLLAMA_WINDOW = 16384
+// Only when a model's window was never read (ollama.cjs reads it from Ollama itself before each run): a conservative estimate.
+const OLLAMA_WINDOW = 8192
+// The window Ollama reports for a model, or null when the client cannot tell (an older client, or Ollama is down).
+const ollamaWindowOf = client => async name => typeof client?.contextWindow === 'function' ? client.contextWindow(name).catch(() => null) : null
 
-function createProviderService({ directory, encryption, chatGPT, ollama, kimiStore, clientFactory = createProviderClient, localFetch = globalThis.fetch }) {
+function createProviderService({ directory, encryption, chatGPT, ollama, kimiStore, clientFactory = createProviderClient, localFetch = globalThis.fetch, log = null }) {
   const stores = new Map(), clientCache = new Map(), errors = new Map(), requests = new Map()
+  const ollamaWindow = ollamaWindowOf(ollama)
   const endpointStore = createEndpointStore({ filePath: path.join(directory, 'endpoints.json') })
   // Model unions (see model-union.cjs). The aggregators are remembered by preset name so context window, tool and vision support follow the acting model.
   const unions = createModelUnions({ filePath: path.join(directory, 'unions.json') })
@@ -137,6 +141,8 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
       await Promise.all([preset.aggregator, ...preset.references.filter(item => item.enabled)].map(item => ensureWindow(item.provider, item.model).catch(() => {})))
       return
     }
+    // Ollama: the window NAJD will run this model with, read from Ollama before the run (owner request 2026-11-09).
+    if (id === 'ollama') { const found = await ollamaWindow(modelName); if (found) windows.set(id + String.fromCharCode(10) + modelName, found.window); return }
     if (!isLocalServer(id)) return
     const key = id + String.fromCharCode(10) + modelName
     // A run that starts while the probe is still going waits for the same answer instead of choosing its budget without it
@@ -173,8 +179,8 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
     try {
       if (id === 'chatgpt') list = await chatGPT.listModels()
       else if (id === 'union') { await refreshUnions(); list = [...aggregators.keys()].map(name => ({ id: name, label: unionLabels.get(name) || name, contextWindow: null })) }
-      // NAJD runs Ollama with num_ctx 16384 (ollama.cjs), whatever the model could hold.
-      else if (id === 'ollama') list = (await ollama.listModels()).map(name => ({ id: name, label: name, contextWindow: OLLAMA_WINDOW }))
+      // Each Ollama model's window as NAJD runs it (ollama.cjs contextWindow: Modelfile, server setting, model maximum, or an estimate).
+      else if (id === 'ollama') list = await Promise.all((await ollama.listModels()).map(async name => { const found = await ollamaWindow(name); return { id: name, label: name, contextWindow: found?.window ?? OLLAMA_WINDOW, contextSource: found?.source || 'fallback', contextEstimated: found ? found.estimated : true } }))
       else {
         const key = await keyStore(id).readKey()
         if (!key && !keyOptional(id)) throw providerError('AUTH_REQUIRED')
@@ -191,13 +197,18 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
         // A failed probe here never erases or enlarges what the running server reported before.
         const contextWindow = observed.get(id + '\n' + m.id) ?? validWindow(m.contextWindow) ?? modelWindow(null, m.id)
         if (current) windows.set(id + '\n' + m.id, contextWindow)
-        return { ...m, contextWindow, efforts: reasoningEfforts(id, m.id) }
+        // Where the window comes from, shown with it: what the running server reports, the provider's list, the model name, or an estimate.
+        const contextSource = m.contextSource || (observed.has(id + '\n' + m.id) ? 'server' : validWindow(m.contextWindow) ? 'listed' : contextWindow ? 'name' : null)
+        return { ...m, contextWindow, contextSource, contextEstimated: m.contextEstimated === true, efforts: reasoningEfforts(id, m.id) }
       })
     } catch (error) { const code = error?.code || 'PROVIDER_ERROR'; errors.set(id, code); throw providerError(code) }
   }
   const inputBudgetOf = (provider0, modelName0) => Math.floor((provider0 === 'union' ? 0.8 : 1) * inputBudgetRaw(provider0, modelName0))
   const UNKNOWN_WINDOW = 64000 // tokens assumed only when a model's window is not known
-  const inputBudgetRaw = (provider0, modelName0) => { const { provider, model: modelName } = acting(provider0, modelName0); return Math.floor((provider === 'ollama' ? OLLAMA_WINDOW : observed.get(provider + String.fromCharCode(10) + modelName) ?? windows.get(provider + String.fromCharCode(10) + modelName) ?? modelWindow(null, modelName) ?? UNKNOWN_WINDOW) * 3) }
+  // A local server whose window could not be read gets a conservative estimate: some (Ollama's OpenAI-compatible API) silently cut a longer
+  // request, which loses the instructions and the question (live 2026-11-09: 4,867 tokens cut to 2,050 on a 4K server).
+  const LOCAL_UNKNOWN_WINDOW = 8192
+  const inputBudgetRaw = (provider0, modelName0) => { const { provider, model: modelName } = acting(provider0, modelName0); return Math.floor((provider === 'ollama' ? windows.get(provider + String.fromCharCode(10) + modelName) ?? OLLAMA_WINDOW : observed.get(provider + String.fromCharCode(10) + modelName) ?? windows.get(provider + String.fromCharCode(10) + modelName) ?? modelWindow(null, modelName) ?? (isLocalServer(provider) ? LOCAL_UNKNOWN_WINDOW : UNKNOWN_WINDOW)) * 3) }
   // A union call: the references advise once per user turn (the first step of the turn), then the aggregator does the whole tool loop with their advice attached.
   async function unionChat({ modelName, history, signal, reasoningEffort, readPath, systemPrompt, agentTurn, routeToken, onAdvice }) {
     if (readPath !== undefined) throw providerError('TOOLS_NOT_SUPPORTED')
@@ -270,6 +281,13 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
       const code = signal?.aborted || controller.signal.aborted ? 'CANCELLED' : timeout.aborted ? 'PROVIDER_TIMEOUT' : error?.code || 'PROVIDER_ERROR'
       errors.set(provider, code)
       if (key && ['AUTH_REQUIRED', 'PROVIDER_REJECTED'].includes(code)) await keyStore(provider).markVerified(key, null).catch(() => {})
+      // The provider's own reason for a refusal goes to NAJD's error log (redacted there), so a refused request can be diagnosed.
+      if (error?.detail && typeof log === 'function') { try { log('provider', provider + ' ' + modelName + ' ' + code + ' ' + (error.status || '') + ': ' + String(error.detail).slice(0, 300)) } catch {} }
+      // A local server that said its window while refusing a too-long request: the next run is sized to it (live 2026-11-09: a server
+      // that did not report its window got the full setup and refused it).
+      if (code === 'CONTEXT_LIMIT' && Number.isInteger(error?.window) && isLocalServer(provider) && validWindow(error.window)) {
+        observed.set(provider + '\n' + modelName, error.window); windows.set(provider + '\n' + modelName, error.window)
+      }
       throw providerError(code)
     } finally { requests.get(provider).delete(controller); activeRequests-- }
   }
@@ -278,7 +296,8 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
     if (provider === 'union') { await refreshUnions(); const aggregator = aggregators.get(modelName); return !!aggregator && supportsTools(aggregator.provider, aggregator.model) }
     if (!toolCapable(provider)) return false
     if (provider !== 'ollama') return true
-    try { return (await ollama.capabilities(modelName)).includes('tools') } catch { return false }
+    // Every Ollama chat model runs the agent loop: natively when it declares tools, through the validated text protocol otherwise (text-tools.cjs).
+    try { const caps = await ollama.capabilities(modelName); return caps.includes('tools') || caps.includes('completion') } catch { return false }
   }
   async function testModel(provider, modelName) { await chat({ provider, modelName, history: [{ role: 'user', text: 'Reply with OK.' }] }); return { verified: true } }
   function previewReasoning(id, model, text, preference) {
@@ -291,7 +310,7 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
   // The acting model: a union acts through its aggregator.
   const acting = (provider, modelName) => provider === 'union' && aggregators.has(modelName) ? aggregators.get(modelName) : { provider, model: modelName }
   const contextWindow = (provider0, modelName0) => { const { provider, model: modelName } = acting(provider0, modelName0); return contextWindowOf(provider, modelName) }
-  const contextWindowOf = (provider, modelName) => provider === 'ollama' ? OLLAMA_WINDOW
+  const contextWindowOf = (provider, modelName) => provider === 'ollama' ? windows.get(provider + '\n' + modelName) ?? OLLAMA_WINDOW
     : observed.get(provider + '\n' + modelName) ?? windows.get(provider + '\n' + modelName) ?? modelWindow(null, modelName)
   // Change the address of an OpenAI-compatible provider or local server (an empty address restores the default).
   async function setEndpoint(id, value) {
@@ -321,6 +340,8 @@ function createProviderService({ directory, encryption, chatGPT, ollama, kimiSto
     limits: async () => ({ policy: await policyStore.get(), cloudAttempts, activeRequests }),
     setLimits: async () => ({ policy: await policyStore.get(), cloudAttempts, activeRequests }),
     inputBudget: inputBudgetOf, ensureWindow,
+    // A model that runs on this computer (Ollama, LM Studio, llama.cpp...): its tokens cost nothing, so no saving applies (owner 2026-11-09).
+    isLocal: id => { try { return definition(id).kind === 'local' } catch { return false } },
     consoleUrl: id => { const p = definition(id); if (!p.consoleUrl) throw providerError('NOT_FOUND'); return p.consoleUrl },
     dispose: () => { for (const id of requests.keys()) stop(id) } }
 }

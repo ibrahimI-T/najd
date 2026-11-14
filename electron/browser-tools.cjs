@@ -6,12 +6,25 @@ const { createHash, randomUUID } = require('node:crypto')
 const fail = code => Object.assign(new Error(code), { code })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const clip = (value, size) => String(value ?? '').replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, size)
-const ACTIONS = ['open', 'search', 'read', 'click', 'type', 'select', 'scroll', 'back', 'focus', 'accounts', 'login']
+const ACTIONS = ['open', 'attach', 'search', 'read', 'find', 'skim', 'tabs', 'click', 'type', 'select', 'scroll', 'back', 'focus', 'accounts', 'login']
 // Actions whose target or page names a hard-to-undo change always need the user's own decision, whatever the access mode (owner rule).
 const { SENSITIVE_ACTION, decoded, formSensitive, sensitiveReason } = require('./browser-policy.cjs')
 
 // Compact, model-friendly page view: text plus one line per element.
-function pageView(page) {
+// How much page text one result carries, and a way to read the rest: the text is a window into the page (it used to stop at 8,000 characters with no
+// way to see the remainder, so a long article or a feed could not be read). `moreTextFrom` is the offset to continue from.
+const TEXT_WINDOW = 12000
+function findText(text, needle, limit) {
+  const fold = ch => /[\u064B-\u0670\u0640\u200B-\u200F]/.test(ch) ? '' : /\s/.test(ch) ? ' ' : ch.toLowerCase()
+  let haystack = '', map = []
+  for (let i = 0; i < text.length; i++) { const f = fold(text[i]); if (f === '' || (f === ' ' && haystack.endsWith(' '))) continue; haystack += f; map.push(i) }
+  const target = [...String(needle)].map(fold).join('').replace(/ +/g, ' ').trim()
+  const out = []
+  if (!target) return out
+  for (let from = 0; out.length < limit; ) { const at = haystack.indexOf(target, from); if (at < 0) break; out.push(map[at]); from = at + target.length }
+  return out
+}
+function pageView(page, offset = 0) {
   if (!page) return null
   const lines = (page.elements || []).map(item => [item.id, item.role, JSON.stringify(clip(item.label, 80)),
     item.href ? '→ ' + item.href : '', item.type && item.type !== 'text' ? 'type=' + item.type : '', item.sensitive ? 'SENSITIVE(user types it)' : '',
@@ -24,19 +37,41 @@ function pageView(page) {
       return '#' + index + ' ' + label.slice(0, 60) + (needsValue ? ' [value: ' + String(pair[1] ?? '').slice(0, 40) + ']' : '')
     })) + (item.optionPairs.length > 40 ? ' (+' + (item.optionPairs.length - 40) + ' more: choose by #index, 40 to ' + (item.optionPairs.length - 1) + ')' : '')
       : item.options ? 'options=' + JSON.stringify(item.options) : ''].filter(Boolean).join(' '))
-  return { url: page.url, title: page.title, text: clip(page.text, 100000).slice(0, 8000), elements: lines, scroll: page.scroll }
+  const full = clip(page.text, 100000), start = Math.max(0, Math.min(Number(offset) || 0, full.length))
+  return { url: page.url, title: page.title, text: full.slice(start, start + TEXT_WINDOW), textOffset: start, textLength: full.length, ...(start + TEXT_WINDOW < full.length ? { moreTextFrom: start + TEXT_WINDOW } : {}), elements: lines, scroll: page.scroll }
 }
 
 // resolveUrl: async check of where a host name really leads (DNS), applied wherever allowUrl is, so a public-looking name that resolves to this computer or a private network is refused too.
 function createBrowserTools({ bridge, journal = null, allowUrl = () => true, resolveUrl = async () => true, vault = null }) {
   const permitted = async url => allowUrl(url) && (await resolveUrl(url).catch(() => false))
+  // The task each call belongs to (by its abort signal): the bridge shows the browser banner for that task, and its Cancel stops it.
+  const owners = new WeakMap()
+  // Presses that changed nothing, per task: the same element pressed again and again on an unchanged page is refused on the third try
+  // (owner's Outlook sign-in, 2026-11-14: the same link pressed three times, each opening another sign-in tab, until the owner stopped it).
+  const presses = new WeakMap(), noSignal = {}
+  const send = (kind, args, options = {}) => bridge.command(kind, args, { ...options, ...(options.signal && owners.has(options.signal) ? { owner: owners.get(options.signal) } : {}) })
   const element = id => (bridge.lastPage()?.elements || []).find(item => item.id === id)
   const pageHost = page => { try { return new URL(page.url).hostname.toLowerCase() } catch { return '' } }
   const hasPasswordField = page => (page?.elements || []).some(item => item.role === 'field' && item.type === 'password')
+  // The first step of a two-step sign-in: no password field, one email/username field, and a Next or sign-in button; nothing that points to
+  // registration or a reset. Returns { field, next } or null.
+  const USERNAME_LABEL = /e-?mail|username|user name|login|sign[ -]?in|account|phone|البريد|الإيميل|اسم المستخدم|الحساب|الجوال|رقم الهاتف|تسجيل الدخول/i
+  const NEXT_LABEL = /^(next|continue|sign[ -]?in|log[ -]?in|التالي|متابعة|استمرار|تسجيل الدخول|دخول)$/i
+  function identifierStep(page) {
+    const elements = page?.elements || []
+    if (hasPasswordField(page)) return null
+    const fields = elements.filter(item => item.role === 'field' && !item.sensitive && ['email', 'text', 'tel', undefined, ''].includes(item.type))
+    const named = fields.filter(item => item.type === 'email' || USERNAME_LABEL.test(`${item.label || ''} ${item.autocomplete || ''} ${item.name || ''}`))
+    if (named.length !== 1) return null
+    if (LOGIN_BAD.test(`${page.url || ''} ${page.title || ''} ${named[0].label || ''}`)) return null
+    const next = elements.filter(item => item.role === 'button' && NEXT_LABEL.test(String(item.label || '').trim()))
+    if (!next.length && !/login|signin|sign-in|auth|account/i.test(page.url || '')) return null
+    return { field: named[0], next: next[0] || null }
+  }
   // The model sees pages without any secret this process handed to a page, and learns when the page asks for a sign-in and which
   // authorized accounts exist for it (labels and usernames only; never a password).
-  async function view(page) {
-    const out = pageView(page)
+  async function view(page, offset = 0) {
+    const out = pageView(page, offset)
     if (!out) return out
     if (vault) {
       out.text = vault.scrub(out.text); out.elements = out.elements.map(line => vault.scrub(line)); out.title = vault.scrub(out.title)
@@ -44,6 +79,14 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
         const accounts = (await vault.forHost(pageHost(page)).catch(() => [])).map(({ id, label, username, autoLogin }) => ({ id, label, username, autoLogin }))
         out.login = { required: true, accounts, note: accounts.length ? 'This page asks for a sign-in. Use action login with target = the account id (NAJD fills the saved password itself; you never see it).'
           : 'This page asks for a sign-in and no authorized account exists for this site. Tell the user to add one in NAJD Settings > Accounts. Never ask for the password in chat.' }
+      } else {
+        // Two-step sign-in (Microsoft, Google and many others ask for the email first, then show the password on the next page): on the
+        // site of an authorized account, the model types the account's username (not a secret) and presses Next with the usual approvals,
+        // then uses action login on the password page (live 2026-11-09: a Microsoft work account stopped at the email step).
+        const step = identifierStep(page)
+        const accounts = step ? (await vault.forHost(pageHost(page)).catch(() => [])).map(({ id, label, username }) => ({ id, label, username })) : []
+        if (accounts.length) out.login = { required: true, step: 'username', accounts, field: step.field.id, next: step.next?.id || null,
+          note: 'This site signs in in two steps. Type the account\'s username into field ' + step.field.id + (step.next ? ' and press ' + step.next.id : ' and press its Next button') + ', then, on the password page, use action login with target = the account id. Never ask for the password in chat.' }
       }
     }
     return out
@@ -76,12 +119,12 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
     return { action }
   }
   // token: the page (and browser) the user approved this action for; the bridge refuses it if another page or browser is current.
-  async function dispatch(kind, args, signal, action, token = null) {
+  async function dispatch(kind, args, signal, action, token = null, prefer = '') {
     try {
-      const raw = await bridge.command(kind, args, { signal, timeoutMs: kind === 'open' ? 45000 : 30000, ...(token ? { bind: token } : {}) })
+      const raw = await send(kind, args, { signal, timeoutMs: kind === 'open' ? 45000 : 30000, ...(token ? { bind: token } : {}), ...(prefer ? { prefer } : {}) })
       // Where the tab ended up (a redirect, a script) is judged like a requested address: a page on this computer or a private network is never shown to the model.
       if (kind !== 'park' && raw && typeof raw === 'object' && typeof raw.url === 'string' && raw.url && !(await permitted(raw.url))) {
-        await bridge.command('park', {}, { signal }).catch(() => {})
+        await send('park', {}, { signal }).catch(() => {})
         bridge.forgetPage?.()
         throw fail('PAGE_ADDRESS_NOT_ALLOWED')
       }
@@ -94,6 +137,20 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
       // dispatch (element gone, sensitive field, not connected, bad input) may have happened already.
       const known = ['ELEMENT_NOT_FOUND', 'SENSITIVE_FIELD', 'BROWSER_NOT_CONNECTED', 'INVALID_INPUT', 'CANCELLED', 'HOST_MISMATCH', 'INSECURE_PAGE', 'NOT_A_LOGIN_FORM', 'AMBIGUOUS_FORM', 'PAGE_CHANGED', 'ELEMENT_CHANGED'].includes(failure?.code) // PARTIAL_ACTION is not listed: something may already have been typed
       const uncertain = failure?.code === 'BROWSER_ACTION_UNKNOWN' || ((!!action || kind === 'login') && ['click', 'type', 'select', 'login'].includes(kind) && !known)
+      // A sign-in that submitted its form often moves the tab to another page before the extension can answer (owner's Microsoft work
+      // account, 2026-11-09: signed in, recorded as unknown). The page the tab is on now decides: no password form there means the
+      // sign-in went through; the same sign-in form means it did not. Anything else stays unknown.
+      // Only a lost answer is looked up this way; a partial action the extension reported (the form changed while it was filled) stays
+      // what it is.
+      if (kind === 'login' && uncertain && !['CANCELLED', 'PARTIAL_ACTION'].includes(failure?.code) && !signal?.aborted) {
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        const now = await send('read', {}, { signal, timeoutMs: 15000 }).catch(() => null)
+        if (now && typeof now === 'object' && typeof now.url === 'string' && (await permitted(now.url).catch(() => false))) {
+          const left = !hasPasswordField(now)
+          if (action) await journal.finish(action.id, left ? true : 'failed').catch(() => {})
+          return Object.assign(vault ? vault.scrubDeep(now) : now, { confirmedAfterNavigation: true })
+        }
+      }
       if (action) await journal.finish(action.id, uncertain ? false : 'failed').catch(() => {})
       // The click or keystroke may already have happened: tell the runtime so the task cannot look like a clean failure.
       if (uncertain && failure && typeof failure === 'object') failure.effectUnknown = true
@@ -116,6 +173,10 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
     const fields = (page.elements || []).filter(item => item.role === 'field')
     const passwords = fields.filter(item => item.type === 'password')
     const passField = passwords[0]
+    // The email step of a two-step sign-in: the username is typed with the usual approval, then login is called again on the password page.
+    const step = passwords.length === 0 ? identifierStep(page) : null
+    if (step) return { status: 'username_step', field: step.field.id, next: step.next?.id || null, username: account.username,
+      note: 'This is the first step of a two-step sign-in. Type ' + JSON.stringify(account.username) + ' into field ' + step.field.id + (step.next ? ', press ' + step.next.id : ', press Next') + ', then call action login again on the password page.' }
     if (passwords.length !== 1 || /new|confirm|repeat|جديدة|تأكيد/i.test(passField.label || '')) return { status: 'not_a_login_form',
       note: 'This is not a plain sign-in form (it asks for several passwords or a new one). NAJD never changes or sets passwords; the user does that.' }
     const verdict = loginVerdict(page, passField)
@@ -179,9 +240,15 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
     describe: () => { const page = bridge.status().page; return page ? `NAJD's browser tab currently shows "${clip(page.title, 80)}" (${clip(page.url, 120)}).` : 'NAJD has no browser tab open yet.' },
     // The extension reports SITE_ACCESS_NEEDED until the owner allows it to work on websites in its panel: say so, do not fail.
     async run(args, context) {
+      if (context?.signal && typeof context.runId === 'string') owners.set(context.signal, context.runId)
       // Saved passwords are loaded into the masking set before any page can be read (a tab that survived a restart may still echo one).
       if (vault?.prime) { try { await vault.prime() } catch { return { status: 'vault_unavailable', note: 'NAJD cannot protect the saved account passwords right now, so it does not read pages. Ask the user to check Settings > Accounts.' } } }
-      try { return await runAction(args, context) }
+      try {
+        const result = await runAction(args, context)
+        // Say which browser the page is in: with several linked, the model otherwise assumes (a request for Edge ran in Chrome and the answer claimed Edge).
+        const where = bridge.lastBrowser?.()
+        return where && result && typeof result === 'object' && result.page ? { ...result, browser: where } : result
+      }
       catch (failure) {
         if (failure?.code === 'PAGE_ADDRESS_NOT_ALLOWED') return { status: 'url_not_allowed', note: 'The tab ended up on an address NAJD does not read (this computer or a private network), possibly after a redirect. Nothing from it was kept, and the tab was emptied.' }
         if (failure?.code === 'PAGE_CHANGED' || failure?.code === 'ELEMENT_CHANGED') return { status: 'page_changed', note: 'The page or browser changed after you read it, so nothing was done. Read the page again and repeat the step if it is still needed.' }
@@ -190,17 +257,71 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
       }
     },
   }
-  async function runAction({ action, target, text, submit }, { requestApproval, signal }) {
+  async function runAction({ action, target, text, submit, browser }, { requestApproval, signal }) {
+      // The browser the user named when several are linked ("edge", "chrome"); used to choose where open, search and attach go.
+      const preferred = typeof browser === 'string' ? browser.trim().slice(0, 30) : ''
+      // Models often say navigate or goto for open (owner live test 2026-11-07: one wasted call); the same rules apply.
+      if (action === 'navigate' || action === 'goto' || action === 'visit') action = 'open'
+      if (action === 'fill' || action === 'input') action = 'type'
       if (!ACTIONS.includes(action) || typeof target !== 'string' || target.length > 2000 || typeof text !== 'string' || text.length > 2000 || typeof submit !== 'boolean') throw fail('INVALID_INPUT')
       if (action === 'open') {
         if (!(await permitted(target))) throw fail('PATH_NOT_ALLOWED')
-        return { status: 'opened', page: await view(await dispatch('open', { url: target }, signal)) }
+        return { status: 'opened', page: await view(await dispatch('open', { url: target }, signal, undefined, null, preferred)) }
+      }
+      if (action === 'attach') {
+        // Adopting a tab the owner can see is their call: the approval names the address, and nothing is read before it.
+        if (!(await permitted(target))) throw fail('PATH_NOT_ALLOWED')
+        if (typeof requestApproval !== 'function') throw fail('PERMISSION_DENIED')
+        const decision = await requestApproval('najd-browser-attach', { path: target, summary: 'Let NAJD work in the open browser tab at this address (read it and act there with your approval).' })
+        if (decision !== 'ALLOW_ONCE') return { status: 'denied_by_user', note: 'The tab was not used.' }
+        try { return { status: 'attached', page: await view(await dispatch('attach', { url: target }, signal, undefined, null, preferred)) } }
+        catch (failure) {
+          if (failure?.code === 'NO_MATCHING_TAB') return { status: 'no_matching_tab', note: 'No open tab in the linked browser has this address (with several browsers linked, name the one with browser). Use action open with the address instead of controlling the browser window with najd_desktop tools.' }
+          if (failure?.code === 'AMBIGUOUS_TAB') return { status: 'ambiguous_tab', note: 'Several tabs match. Give the exact address of the one to use.' }
+          throw failure
+        }
       }
       if (action === 'search') {
         if (!target.trim() || target.length > 300) throw fail('INVALID_INPUT')
-        return { status: 'searched', page: await view(await dispatch('open', { url: 'https://www.google.com/search?q=' + encodeURIComponent(target.trim()) }, signal)) }
+        return { status: 'searched', page: await view(await dispatch('open', { url: 'https://www.google.com/search?q=' + encodeURIComponent(target.trim()) }, signal, undefined, null, preferred)) }
       }
-      if (['read', 'back'].includes(action)) return { status: action === 'read' ? 'read' : 'went_back', page: await view(await dispatch(action, {}, signal)) }
+      // read: target "" reads from the start; target "offset:12000" (or just 12000) continues a long page from that character.
+      if (action === 'read') { const at = /^(?:offset:)?\s*(\d{1,6})$/.exec(target.trim()); return { status: 'read', page: await view(await dispatch('read', {}, signal), at ? Number(at[1]) : 0) } }
+      if (action === 'back') return { status: 'went_back', page: await view(await dispatch('back', {}, signal)) }
+      // find: where a word or phrase occurs on the page (case, spacing and Arabic marks ignored), with the text around it and the offset to read from.
+      if (action === 'find') {
+        const query = (text.trim() || target.trim())
+        if (!query || query.length > 200) throw fail('INVALID_INPUT')
+        const page = await dispatch('read', {}, signal)
+        const body = vault ? vault.scrub(clip(page.text, 100000)) : clip(page.text, 100000)
+        const places = findText(body, query, 12)
+        return { status: 'found', url: page.url, title: vault ? vault.scrub(String(page.title || '')) : page.title, textLength: body.length, count: places.length,
+          matches: places.map(at => ({ offset: at, around: body.slice(Math.max(0, at - 120), at + query.length + 180) })),
+          note: places.length ? 'Read from a match with action read and target "offset:N" (N a little before the match).' : 'No match on this page as loaded. A long or endless page may need skim or scroll first.' }
+      }
+      // skim: the page read screen after screen in one step (it scrolls by itself, up to 8 screens, and stops at the bottom), the new text of each screen
+      // collected once. For long pages and feeds this replaces many scroll-and-read round trips.
+      if (action === 'skim') {
+        const LIMIT = 20000, SCREENS = 8
+        let page = await dispatch('read', {}, signal)
+        const seen = new Set(), parts = []; let chars = 0, screens = 1, idle = 0, grew = 0
+        const take = value => { let added = 0; for (const raw of String(value?.text || '').split(/\n+/)) { const line = raw.replace(/\s+/g, ' ').trim(); if (!line || seen.has(line)) continue; seen.add(line); parts.push(line); added += line.length + 1 } chars += added; return added }
+        take(page)
+        for (; screens < SCREENS && chars < LIMIT * 1.5 && idle < 2; screens++) {
+          page = await dispatch('scroll', { direction: 'down' }, signal)
+          if (take(page) > 0) { idle = 0; grew++ } else idle++
+        }
+        const joined = vault ? vault.scrub(parts.join('\n')) : parts.join('\n')
+        return { status: 'skimmed', url: page.url, title: vault ? vault.scrub(String(page.title || '')) : page.title, screens, chars: joined.length, complete: idle >= 2, endless: idle < 2 && screens >= SCREENS && grew >= 3,
+          text: joined.slice(0, LIMIT), truncated: joined.length > LIMIT,
+          note: idle >= 2 ? 'Reached the end of the page.' : 'More below: the page keeps loading as it is scrolled (a feed), or the 8-screen limit was reached. Answer from what was collected, or scroll and skim again.' }
+      }
+      // tabs: the tabs of the linked browser (title, address, whether NAJD works in it). Only the NAJD tab and tabs the user handed over can be acted on.
+      if (action === 'tabs') {
+        const listed = await dispatch('list_tabs', {}, signal)
+        const rows = (Array.isArray(listed?.tabs) ? listed.tabs : []).slice(0, 40).map(tab => ({ title: clip(vault ? vault.scrub(String(tab.title || '')) : tab.title, 100), url: clip(tab.url, 200), active: tab.active === true, ownership: tab.ownership, current: tab.current === true }))
+        return { status: 'tabs', tabs: rows, note: 'ownership: owned = the NAJD tab, attached = a tab the user handed over, other = untouched. To work in another tab use action attach with its exact address (the user is asked).' }
+      }
       if (action === 'scroll') return { status: 'scrolled', page: await view(await dispatch('scroll', { direction: target === 'up' ? 'up' : 'down' }, signal)) }
       if (action === 'focus') { await dispatch('focus', {}, signal); return { status: 'shown_to_user', note: 'The NAJD tab is now in front of the user.' } }
       if (action === 'accounts') {
@@ -218,6 +339,9 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
       if (action === 'click' && item.role === 'link' && item.target && !(await permitted(item.target))) return { status: 'url_not_allowed', note: 'That link leads to an address NAJD does not open (this computer or a private network).' }
       if ((action === 'click' && item.formAction && item.submits || action === 'type' && submit && item.formAction) && !(await permitted(item.formAction))) return { status: 'url_not_allowed', note: 'That form submits to an address NAJD does not use (this computer or a private network).' }
       if (action === 'click') {
+        const pressKey = (bridge.lastPage()?.url || '') + '|' + item.role + '|' + clip(item.label, 120), memoryKey = signal || noSignal
+        const lastPress = presses.get(memoryKey)
+        if (lastPress && lastPress.key === pressKey && lastPress.unchanged >= 2) return { status: 'repeat_refused', note: 'This element was already pressed twice on this page and nothing changed. It is not pressed again. Read the page or use find to see what is in the way, try another way, or tell the user what blocks you.' }
         // Following an ordinary link is like opening a page; anything else (buttons, form submits, checkboxes) is approved.
         const plainLink = item.role === 'link' && /^https?:\/\//.test(item.href || '') && !item.longTarget && !item.incomplete && !sensitiveReason(item, bridge.lastPage())
         let journaled = null
@@ -229,11 +353,20 @@ function createBrowserTools({ bridge, journal = null, allowUrl = () => true, res
           if (gate.denied) return { status: 'denied_by_user', note: 'Nothing was pressed.' }
           journaled = gate.action
         }
-        return { status: 'clicked', page: await view(await dispatch('click', { id: item.id, expect: { ...expect, plain: plainLink } }, signal, journaled, token)) }
+        // Whether the address changed is the first thing to check after pressing a link or a submit button; the page is returned either way,
+        // but a press that left the same address (nothing was submitted, a dialog, a validation message) is said plainly
+        // (live test 2026-11-13: a "clicked" result was reported as a successful submit while the form was still showing).
+        const urlBefore = bridge.lastPage()?.url || ''
+        const shown = await view(await dispatch('click', { id: item.id, expect: { ...expect, plain: plainLink } }, signal, journaled, token))
+        const navigated = !!shown?.url && !!urlBefore && shown.url !== urlBefore
+        const unchanged = navigated ? 0 : (lastPress && lastPress.key === pressKey ? lastPress.unchanged : 0) + 1
+        presses.set(memoryKey, { key: pressKey, unchanged })
+        if (unchanged >= 2) return { status: 'clicked', navigated: false, note: 'Pressed twice now and the page did not change. Do not press this element again: read the page, look for what is in the way (a dialog, a sign-in, a new tab), or tell the user.', page: shown }
+        return { status: 'clicked', navigated, ...(navigated ? {} : { note: 'The address did not change after the press. If the press was meant to open or submit something, read the page and check before saying it worked.' }), page: shown }
       }
       if (action === 'type' || action === 'select') {
         if (item.sensitive) {
-          await bridge.command('focus', {}, { signal }).catch(() => {})
+          await send('focus', {}, { signal }).catch(() => {})
           return { status: 'needs_user', note: 'Passwords and payment details are typed by the user only. The tab is shown to the user: ask them to fill this field themselves and tell you when done.' }
         }
         if (action === 'type' && item.role !== 'field') return { status: 'not_a_field', note: 'Type only into elements with role field.' }

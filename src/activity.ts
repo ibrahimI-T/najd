@@ -39,6 +39,7 @@ const KIND_OF: Record<string, ActivityKind> = {
   'najd-web-extract': 'web', 'najd-web-preview': 'web', 'najd-browser': 'browser',
   'najd-terminal-run': 'command', 'najd-process-start': 'command', 'najd-process-list': 'command', 'najd-process-output': 'command', 'najd-process-stop': 'command',
   'najd-python-run': 'python',
+  'najd-blender-run': 'python',
   'najd-skills-read': 'skill', 'najd-skill-save': 'skill', 'najd-mcp-call': 'mcp', 'najd-mcp-install': 'mcp', 'najd-extension-install': 'plugin',
   'najd-desktop-windows': 'desktop', 'najd-desktop-open': 'desktop', 'najd-desktop-read': 'desktop', 'najd-desktop-act': 'desktop',
   'najd-screen-capture': 'desktop', 'najd-connections-apps': 'desktop',
@@ -51,7 +52,7 @@ const KIND_OF: Record<string, ActivityKind> = {
 export const NOTE_KINDS = new Set<ActivityKind>(['reasoning', 'thinking', 'advice'])
 const GROUPABLE = new Set<ActivityKind>(['file-read', 'search', 'web', 'browser'])
 // Only these tools read the contents of a known file; listings, log lists and document reviews are not "files read".
-const COMMAND_TOOLS = new Set(['najd-terminal-run', 'najd-python-run', 'najd-process-start'])
+const COMMAND_TOOLS = new Set(['najd-terminal-run', 'najd-python-run', 'najd-blender-run', 'najd-process-start'])
 const FILE_CONTENT_TOOLS = new Set(['najd-files-read', 'najd-library-read', 'najd-log-read'])
 // A page visit has a known target: a URL for web tools, "open · URL" or "search · query" for the browser. Reads, scrolls, clicks
 // and other browser actions carry only an action label and are not page visits.
@@ -81,6 +82,29 @@ function classify(type: string, text: string): { status: ActivityStatus; error?:
 }
 const time = (value: string) => { const parsed = Date.parse(value); return Number.isFinite(parsed) ? parsed : 0 }
 
+// A finished run worth offering as a reusable skill: it made or changed something (a written file, a script or command, a picture, a step on
+// the desktop or in the browser, an MCP call) or took five working steps beyond look-ups. Searches, page and file reads alone are not a workflow
+// (daily-use test 2026-11-14: a news summary of five searches got the offer, a budget workbook made by one script did not).
+const MAKING = new Set<ActivityKind>(['file-write', 'python', 'command', 'git', 'media', 'desktop', 'browser', 'mcp', 'plugin'])
+const LOOKUP = new Set<ActivityKind>(['search', 'web', 'file-read', 'skill', 'memory', 'tool', 'reasoning', 'delegate'])
+// Browser steps that only look (open, search, read, find, skim, list tabs, go back) are look-ups too; pressing, typing and choosing make
+// something happen on a site (daily use 2026-11-14: reading one Wikipedia page in NAJD's tab got the offer).
+const BROWSER_LOOKUP = /^\s*(open|search|read|find|skim|tabs|list|back|forward|scroll|observe|wait|screenshot)\b/i
+export function skillWorthyRun(events: NajdTaskActivity['events'] | undefined): boolean {
+  const list = Array.isArray(events) ? events : []
+  if (!list.some(event => event.type === 'task.completed')) return false
+  // A step counts once it completed; its kind comes from how it started (the browser action is named there, as "open · URL").
+  const started = list.filter(event => event.type === 'tool.started')
+  const completed = list.filter(event => event.type === 'tool.completed')
+  const done = completed.map(event => {
+    const kind = activityKind(event.tool, event.detail)
+    if (kind !== 'browser') return kind
+    const start = [...started].reverse().find(item => item.tool === event.tool && Date.parse(item.time) <= Date.parse(event.time))
+    return BROWSER_LOOKUP.test(String(start?.detail || '')) ? 'web' : kind
+  })
+  return done.some(kind => MAKING.has(kind)) || done.filter(kind => !LOOKUP.has(kind)).length >= 5
+}
+
 export function buildActivity(activity: NajdTaskActivity | undefined, now = Date.now()): ActivityView {
   const counts: ActivityCounts = { tools: 0, commands: 0, filesRead: 0, filesChanged: 0, searches: 0, pages: 0, skills: 0, mcp: 0, errors: 0, approvals: 0 }
   const events: AgentActivityEvent[] = []
@@ -105,7 +129,8 @@ export function buildActivity(activity: NajdTaskActivity | undefined, now = Date
     } else if (raw.type === 'reasoning.text') {
       // The model's own thinking before a step (timed from the previous event), or a union advisor's note (first line: the advisor).
       if (raw.tool === 'najd-union') { const [first, ...rest] = detail.split('\n'); events.push(make({ kind: 'advice', tool: raw.tool, model: first, title: 'advice', summary: rest.join('\n').trim(), status: 'succeeded', startedAt: at, endedAt: at, durationMs: 0 })) }
-      else events.push(make({ kind: 'thinking', tool: raw.tool, title: 'thinking', summary: detail, status: 'succeeded', startedAt: Math.min(previousAt, at), endedAt: at, durationMs: Math.max(0, at - previousAt) }))
+      // The provider's summary headings come as Markdown (**Planning …**); the steps list shows plain text (owner screenshot 2026-11-09).
+      else events.push(make({ kind: 'thinking', tool: raw.tool, title: 'thinking', summary: detail.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/^#+\s*/gm, '').trim(), status: 'succeeded', startedAt: Math.min(previousAt, at), endedAt: at, durationMs: Math.max(0, at - previousAt) }))
     } else if (raw.type === 'reasoning.summary') {
       events.push(make({ kind: 'reasoning', tool: raw.tool, title: 'reasoning', summary: detail, status: 'succeeded', startedAt: at, endedAt: at, durationMs: 0 }))
     } else if (raw.type === 'tool.started') {
@@ -282,4 +307,52 @@ export function formatCompact(ms: number, language: 'ar' | 'en'): string {
   const minutes = Math.floor(total / 60), seconds = total % 60
   if (language === 'ar') return minutes ? `${minutes} د${seconds ? ` ${seconds} ث` : ''}` : `${seconds} ث`
   return minutes ? `${minutes}m${seconds ? ` ${seconds}s` : ''}` : `${seconds}s`
+}
+
+// Run receipt (original NAJD improvement, 2026-11-10): what a finished run actually did, from its real steps only. A step counts as
+// confirmed when its tool finished cleanly, unconfirmed when its effect could not be checked, failed when it errored, and declined when
+// the owner or a safety rule stopped it. Notes, planning, discovery and approvals are not steps of the task.
+export interface RunReceipt { confirmed: number; unconfirmed: number; failed: number; declined: number; total: number }
+const NOT_WORK = new Set<ActivityKind>(['reasoning', 'thinking', 'advice', 'plan', 'tool', 'approval', 'skill', 'wait', 'warning', 'error', 'success'])
+export function receiptOf(steps: AgentActivityEvent[]): RunReceipt {
+  const receipt: RunReceipt = { confirmed: 0, unconfirmed: 0, failed: 0, declined: 0, total: 0 }
+  const visit = (step: AgentActivityEvent) => {
+    if (!NOT_WORK.has(step.kind) && step.status !== 'running' && step.status !== 'awaiting-approval') {
+      receipt.total++
+      if (step.status === 'succeeded') receipt.confirmed++
+      else if (step.status === 'unconfirmed') receipt.unconfirmed++
+      else if (step.status === 'cancelled') receipt.declined++
+      else receipt.failed++
+    }
+    for (const child of step.children || []) visit(child)
+  }
+  steps.forEach(visit)
+  return receipt
+}
+export function receiptText(receipt: RunReceipt, language: 'ar' | 'en'): string {
+  if (!receipt.total) return ''
+  const ar = language === 'ar', parts: string[] = []
+  const steps = (n: number) => n === 1 ? 'خطوة واحدة' : n === 2 ? 'خطوتان' : n <= 10 ? `${n} خطوات` : `${n} خطوة`
+  if (receipt.confirmed) parts.push(ar ? `${steps(receipt.confirmed)} مؤكدة` : `${receipt.confirmed} confirmed`)
+  if (receipt.unconfirmed) parts.push(ar ? `${receipt.unconfirmed} غير مؤكدة: راجعها قبل الاعتماد عليها` : `${receipt.unconfirmed} unconfirmed: check before relying on it`)
+  if (receipt.failed) parts.push(ar ? `${receipt.failed} فشلت` : `${receipt.failed} failed`)
+  if (receipt.declined) parts.push(ar ? `${receipt.declined} لم تُنفَّذ` : `${receipt.declined} not done`)
+  return parts.join(ar ? ' · ' : ' · ')
+}
+
+// Resume note (original NAJD improvement, 2026-11-10): what a stopped or failed run had already done, for the model that continues it,
+// so finished steps are checked rather than repeated. Built from the real steps only; bounded.
+export function resumeNote(steps: AgentActivityEvent[]): string {
+  const lines: string[] = []
+  const visit = (step: AgentActivityEvent) => {
+    if (!NOT_WORK.has(step.kind) && step.status !== 'running' && step.status !== 'awaiting-approval' && lines.length < 30) {
+      const state = step.status === 'succeeded' ? 'done' : step.status === 'unconfirmed' ? 'effect unknown' : step.status === 'cancelled' ? 'not done' : 'failed'
+      lines.push(`- ${step.tool || step.title}${step.summary ? ' (' + step.summary.replace(/\s+/g, ' ').slice(0, 120) + ')' : ''}: ${state}`)
+    }
+    for (const child of step.children || []) visit(child)
+  }
+  steps.forEach(visit)
+  if (!lines.length) return ''
+  return 'NAJD_RESUME: the previous attempt at this request stopped before answering. Steps it had already taken:\n' + lines.join('\n') +
+    '\nContinue from here. Do not repeat a step marked done; for a step marked effect unknown, check the real state first.'
 }

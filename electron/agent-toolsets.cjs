@@ -9,6 +9,8 @@ const TOOLSETS = {
   // The workflow graph: a short plan whose steps are ticked off with a one-line result each (small windows start with it).
   plan: ['najd_plan'],
   memory: ['najd_memory'],
+  // Task Center, the built-in browser and dashboards.
+  workstation: ['najd_workstation'],
   // Earlier conversations: loaded when the user refers to another chat (najd_tools_load chats).
   chats: ['najd_chats_search', 'najd_chats_read'],
   extensions: ['najd_extensions_search', 'najd_extension_install', 'najd_skill_save'],
@@ -32,6 +34,8 @@ const TOOLSETS = {
   transcribe: ['najd_video_transcribe'],
   mcp: ['najd_mcp_call'],
   python: ['najd_python_run', 'najd_log_read'],
+  '3d': ['najd_blender_run', 'najd_log_read'],
+  mobile: ['najd_android_build'],
   // Office and design review (M3-8): only the profiles that make documents carry it; others load it on demand.
   office: ['najd_office_review'],
   'desktop-read': ['najd_desktop_windows', 'najd_desktop_read'],
@@ -49,16 +53,16 @@ const TOOLSETS = {
 const TOOLSET_PURPOSE = {
   'library-export': 'copy an attachment into the workspace', plan: 'track a multi-step task', toolbox: 'exact counts, tables, search, sums, dates',
   webpreview: 'render and test web pages and HTML files', knowledge: 'search knowledge bases', extensions: 'find, install or save skills and MCP servers',
-  chats: 'earlier conversations', memory: 'remember preferences', skills: 'read skill guides', connections: 'connected app locations', library: 'read attachments',
+  chats: 'earlier conversations', workstation: 'verified skill/plugin market, installed packages, scheduled tasks, built-in browser tabs, dashboards', memory: 'remember preferences', skills: 'read skill guides', connections: 'connected app locations', library: 'read attachments',
   'files-read': 'list, read, search files', files: 'create, write, edit, read files', 'files-manage': 'move, rename, delete files only',
   terminal: 'short PowerShell commands (60 s)', web: 'web search and page text', browser: 'act in the user browser tab', media: 'generate images',
-  video: 'generate videos', mcp: 'call connected MCP tools', delegate: 'sub-agents for independent research', python: 'run Python',
+  video: 'generate videos', mcp: 'call connected MCP tools', delegate: 'sub-agents for independent research', python: 'run Python', '3d': 'Blender: build, edit, export and render 3D models', mobile: 'build Android apps (APK) from a web app',
   office: 'review Office files', process: 'servers, watchers and long commands', 'desktop-read': 'list and read windows',
   desktop: 'open apps, read and act in windows', screen: 'screenshots', logs: 'saved command output'
 }
 const describeToolsets = names => names.map(name => TOOLSET_PURPOSE[name] ? name + ' (' + TOOLSET_PURPOSE[name] + ')' : name).join(', ')
 // Toolsets the model may load itself (najd_tools_load). "transcribe" follows attachments only.
-const LOADABLE = ['library-export', 'plan', 'toolbox', 'webpreview', 'knowledge', 'extensions', 'chats', 'memory', 'skills', 'connections', 'library', 'files-read', 'files', 'files-manage', 'terminal', 'web', 'browser', 'media', 'video', 'mcp', 'delegate', 'python', 'office', 'process', 'desktop-read', 'desktop', 'screen', 'logs']
+const LOADABLE = ['mobile', '3d', 'workstation', 'library-export', 'plan', 'toolbox', 'webpreview', 'knowledge', 'extensions', 'chats', 'memory', 'skills', 'connections', 'library', 'files-read', 'files', 'files-manage', 'terminal', 'web', 'browser', 'media', 'video', 'mcp', 'delegate', 'python', 'office', 'process', 'desktop-read', 'desktop', 'screen', 'logs']
 // Never unloaded: discovery/loading and the user's memory stay available for the whole run (M2-007).
 const PERMANENT = new Set(['core', 'memory'])
 // A delegated sub-agent reads and researches only (AP-001): no memory, no effects, no further delegation.
@@ -73,13 +77,21 @@ const PROFILE_BASE_LIMIT = 22
 // Websites and web apps are built with code, so they choose the coding profile before design (owner request 2026-10-20).
 // Only a request to make one counts: "open the Google site" is browsing, not building.
 const WEBSITE = /\b(build|make|create|design|develop|code|redesign|need|want)\b[^.\n]{0,40}\b(website|web ?site|landing page|web ?app|webpage|web page|homepage|portfolio)\b|(سو|سوي|سوّي|ابن|ابني|صمم|صمّم|اصنع|طور|طوّر|أنشئ|انشئ|اعمل|بناء|تصميم|برمج|ابي|أبي|أبغى|ابغى|ودي)[^.\n]{0,30}(موقع|صفحة ويب|صفحة هبوط|لاندنق|لاندنج|متجر الكتروني|متجر إلكتروني|ويب سايت|تطبيق ويب)/i
+// A web address or a named browser means browsing (live test 2026-11-13: "open https://... in Edge, type a name, press Submit" went to the
+// computer profile because of the word "press", so najd_browser was not even offered and the model drove the Edge window).
+const BROWSING = /https?:\/\/|\b(edge|chrome|firefox|brave)\b|إيدج|ايدج|إدج|ادج|كروم|فايرفوكس|بريف/i
 const PROFILE_RULES = [
+  // NAJD's own browser (the extension tab or the built-in browser) is browsing, never desktop control of a window (owner live test 2026-11-07).
+  ['research', /\b(najd browser|najd's browser|built-?in browser)\b|متصفح نجد|المتصفح المدمج|متصفح النجد/i],
   ['coding', WEBSITE],
   ['office', /\b(excel|xlsx|spreadsheet|powerpoint|pptx|presentation|slides?|word document|docx|invoice|budget sheet)\b|اكسل|إكسل|جدول بيانات|عرض تقديمي|بريزنتيشن|بريسنتيشن|شرائح|سلايد|باوربوينت|وورد|مستند وورد|فاتورة|\b(convert|resize)\b[^\n]{0,60}\b(pdf|png|jpe?g|webp|csv|xlsx|docx|pptx|md|txt|image|picture|photo)\b|(حوّل|حول|غيّر صيغة|حجّم|صغّر)\s[^\n]{0,60}(pdf|png|jpe?g|webp|csv|صورة|صور|ملف)/i],
-  ['coding', /\b(code|coding|program|script|function|bug|debug|compile|repo|repository|git|npm|python|javascript|typescript|api|sql|regex|refactor|unit test)\b|برمج|كود|سكربت|سكريبت|دالة|خطأ برمجي|مستودع|بايثون|جافاسكربت/i],
-  ['computer', /\b(screenshot|screen capture|click|double.click|desktop|taskbar)\b|\b(open|launch|control)\b[^.\n]{0,50}\b(app|program|settings|notepad|calculator|discord|spotify|steam)\b|لقطة شاشة|صور الشاشة|صوّر الشاشة|اقرأ الشاشة|اقرا الشاشة|اضغط|انقر|تحكم بالكمبيوتر|افتح برنامج|شغل برنامج|افتح الحاسبة|افتح المفكرة|افتح ديسكورد|افتح دسكورد|افتح الإعدادات|افتح الاعدادات/i],
+  ['coding', /\b(code|coding|program|script|function|bug|debug|compile|repo|repository|git|npm|python|javascript|typescript|api|sql|regex|refactor|unit test|failing tests?|test suite|stack trace|traceback|build error|compile error)\b|\b[\w-]+\.(?:js|cjs|mjs|ts|tsx|jsx|py|java|cs|cpp|go|rs|rb|php|vue|kt|swift)\b|برمج|كود|سكربت|سكريبت|دالة|خطأ برمجي|مستودع|بايثون|جافاسكربت/i],
+  ['research', BROWSING],
+  ['computer', /\b(screenshot|screen capture|click|double.click|desktop|taskbar)\b|\b(open|launch|control)\b[^.\n]{0,50}\b(app|program|settings|notepad|calculator|discord|spotify|steam)\b|لقطة شاشة|صور الشاشة|صوّر الشاشة|اقرأ الشاشة|اقرا الشاشة|اضغط|انقر|تحكم بالكمبيوتر|افتح برنامج|شغل برنامج|افتح الحاسبة|افتح المفكرة|افتح ديسكورد|افتح دسكورد|افتح الإعدادات|افتح الاعدادات|\b(drag|scroll (down|up|to|the))\b|اسحب\s[^\n]{0,30}(الى|إلى|على|فوق)|مرر (الصفحة|القائمة|النافذة)|مرّر (الصفحة|القائمة|النافذة)/i],
   ['design', /\b(design|logo|poster|banner|mockup|ui|ux|illustration|image|picture|icon|brand)\b|تصميم|صمم|شعار|لوقو|لوغو|بوستر|بانر|صورة|ايقونة|أيقونة|هوية بصرية/i],
-  ['research', /\b(research|compare|comparison|find out|look up|sources|latest news|price of|prices)\b|ابحث|بحث عن|قارن|مقارنة|اسعار|أسعار|بكم|آخر الأخبار|مصادر/i]
+  // News, prices, weather and results start with web search (daily-use test 2026-11-14: "the 3 most important AI news this week" went to the
+  // general profile, which spent two extra steps finding and loading the web tools before the first search).
+  ['research', /\b(research|compare|comparison|find out|look up|sources|latest news|news|headlines|price of|prices|weather|forecast|exchange rate|score of|match result)\b|ابحث|بحث عن|قارن|مقارنة|اسعار|أسعار|سعر|بكم|آخر الأخبار|أخبار|اخبار|الأخبار|الاخبار|خبر عن|مصادر|الطقس|طقس|درجة الحرارة|سعر الصرف|نتيجة مباراة|نتيجة المباراة/i]
 ]
 const TOOLSET_RULES = [
   ['toolbox', /\b(calculate|calculation|total|sum of|average|mean|median|count|how many|compare|diff|duplicates?|csv|tsv|json|checksum|hash|days between|how many days|percent|percentage|inventory|largest files?)\b|احسب|حساب|كم عدد|كم يوم|كم مجموع|المجموع|الاجمالي|الإجمالي|المتوسط|قارن|مقارنة الملفات|الفرق بين|مكرر|مكررة|اكبر الملفات|أكبر الملفات|جدول بيانات|\bcsv\b/i],
@@ -87,8 +99,17 @@ const TOOLSET_RULES = [
   // A named file to make or change ("create najd-test/test.txt"), even when the word "file" is not used.
   ['files', /(\b(save|write|create|make|edit|update|add)\b|أنشئ|انشئ|إنشاء|انشاء|اكتب|سو|سوي|اصنع|عدل|حدث)[^\n]{0,80}[\w\-\/\\]+\.(txt|md|json|csv|tsv|html?|css|js|ts|tsx|jsx|py|xml|ya?ml|ini|log|bat|ps1)\b/i],
   ['files-manage', /\b(rename|move|delete)\b.*\b(file|folder|document)s?\b|\b(file|folder)s?\b.*\b(rename|move|delete)\b|احذف|انقل الملف|انقل الملفات|غير اسم|رتب الملفات/i],
+  // A request that names Python gets the Python runner from the first call instead of loading it on demand (one call fewer).
+  ['python', /\b(python|pandas|numpy|matplotlib|jupyter)\b|بايثون|بيثون/i],
+  // Android apps from a web app with the owner's SDK (R-080).
+  ['mobile', /\b(android|apk|mobile app|phone app)\b|أندرويد|اندرويد|تطبيق جوال|تطبيق للجوال|تطبيق موبايل|تطبيق هاتف/i],
+  // 3D work goes to the owner's Blender (R-080).
+  ['3d', /\b(3d|blender|bpy|glb|gltf|fbx|mesh|render(ing)?|low[- ]?poly)\b|ثلاثي الأبعاد|ثلاثي الابعاد|ثري ?دي|بلندر|مجسم|نموذج ثلاثي/i],
   ['terminal', /\b(powershell|command|terminal|cmd|install|run the|process)\b|أمر|الطرفية|باورشل|ثبت|شغل الأمر/i],
-  ['browser', /\b(browser|website|open the site|sign in|log in|book|order online|tab)\b|المتصفح|الموقع|افتح موقع|سجل دخول|احجز|اطلب من/i],
+  ['browser', /\b(browser|website|open the site|sign in|log in|book|order online|tab)\b|المتصفح|متصفح|الموقع|افتح موقع|سجل دخول|احجز|اطلب من/i],
+  ['browser', BROWSING],
+  // The built-in browser works without the extension: page text and numbered controls instead of reading a desktop window.
+  ['workstation', /\b(browser|website|web ?page|search the web)\b|متصفح|الموقع|ابحث في/i],
   ['media', /\b(generate|draw|make|create)\b.*\b(image|picture|logo)\b|ارسم|ولد صورة|سو صورة|سوي صورة/i],
   ['video', /\b(generate|make|create)\b.*\bvideo\b|فيديو|مقطع/i],
   // Building a website: page previews to check the design, plus long-running builds and dev servers.
@@ -96,7 +117,8 @@ const TOOLSET_RULES = [
   // An HTML page or a preview, even without the word "website" (owner live test 2026-10-31: "a simple HTML page with a counter").
   ['webpreview', /\bhtml?\b|\.html?\b|\bpreview\b|\bweb ?page\b|معاينة|عاين|صفحة html|صفحة ويب/i],
   // Finding and adding a missing skill, plugin or MCP server (owner request 2026-10-20).
-  ['extensions', /\b(install|add|find|get)\b.*\b(skills?|plugins?|mcp|connectors?|integrations?|extensions?)\b|\bmcp\b|مهار|اضاف|إضاف|ثبت|حمل|نزل|اتصال/i],
+  ['workstation', /\b(install|add|find|get|create|save|make|write)\b.*\b(skills?|plugins?|market|extensions?)\b|\bmarketplace\b|مهار|سوق|اضاف|إضاف|ثبت|حمل|نزل/i],
+  ['workstation', /\b(schedule|every (day|week|morning)|recurring|dashboard|built-?in browser|task center)\b|جدول|كل يوم|كل صباح|لوحة بيانات|مركز المهام/i],
   // Opening an app or Windows Settings (owner request 2026-10-20: "افتح دسكورد").
   ['desktop', /\b(open|launch)\b.*\b(app|program|settings|discord|spotify|steam|word|excel|outlook|teams|whatsapp|telegram)\b|افتح|افتحلي|شغل برنامج|شغّل برنامج/i]
 ]
@@ -110,12 +132,46 @@ function selectProfile({ text = '', pinned = null, last = null, attachmentKinds 
   if (last && profiles[last]) return { profile: last, reason: 'previous', extra: extraToolsets(value) }
   return { profile: 'general', reason: 'default', extra: extraToolsets(value) }
 }
-function extraToolsets(text) { return [...new Set(TOOLSET_RULES.filter(([, rule]) => rule.test(String(text).slice(0, 4000))).map(([name]) => name))] }
+// A request for NAJD's own browser never adds desktop window control.
+const NAJD_BROWSER = PROFILE_RULES[0][1]
+function extraToolsets(text) { const value = String(text).slice(0, 4000), own = NAJD_BROWSER.test(value); return [...new Set(TOOLSET_RULES.filter(([name, rule]) => rule.test(value) && !(own && ['desktop', 'screen'].includes(name))).map(([name]) => name))] }
 
 // ready(name) -> boolean for a toolset; definitions: the runtime's tool definitions (by name).
+// Plain conversation (a greeting, a question answered from knowledge): no task tools up front, only discovery (core), so the model
+// can still find and load any capability (universal discovery, owner request 2026-11-09).
+const ACTION_WORDS = /\b(open|launch|write|create|make|build|edit|delete|remove|move|copy|run|install|search|find|look up|download|upload|send|read|check|fix|debug|compile|convert|translate this file|summari[sz]e (this|the) (file|document|page)|generate|draw|render|export|import|schedule|remind|book|order|analy[sz]e|calculate|compare|plot|chart|scan|click|type|fill)\b|افتح|اكتب|أنشئ|انشئ|سو|سوي|اصنع|ابن|عدل|احذف|امسح|انقل|انسخ|شغل|ثبت|ابحث|دور|حمل|نزل|ارسل|أرسل|اقرأ|اقرا|افحص|صلح|أصلح|حول|ترجم الملف|لخص الملف|ولد|ارسم|صدر|استورد|جدول|ذكرني|احجز|اطلب|حلل|احسب|قارن|اضغط|عب|املأ/i
+// Not listed on purpose: drag, scroll, اسحب, مرر. A short request of that kind starts with discovery only and the model loads exactly the
+// desktop tools it needs; measured live 2026-11-13 (drag on a test window), loading desktop+screen+skills up front cost ~1,700 tokens more
+// for the same four model calls (13,885 lazy vs 15,574 preloaded).
+const PATHLIKE = /https?:\/\/|www\.|[a-z]:\\|\.(txt|md|json|csv|tsv|xlsx?|docx?|pptx?|pdf|png|jpe?g|gif|mp4|mp3|wav|zip|py|js|ts|html?|css)\b/i
+function isConversational({ text, attachmentKinds = [] } = {}) {
+  const value = String(text || '').trim()
+  return !!value && value.length <= 280 && !attachmentKinds.length && !ACTION_WORDS.test(value) && !PATHLIKE.test(value) && extraToolsets(value).length === 0
+}
+
 function createToolsetManager({ definitions, ready, scope = 'main' }) {
   const byName = new Map(definitions.map(item => [item.name, item]))
   const active = [], loaded = [], removed = new Set()
+  // Use tracking for on-demand loading (owner request 2026-11-09): the model call each toolset was last loaded or used in. A toolset
+  // idle for a while is dropped softly (it comes back by itself when one of its tools is called), and a full set makes room by dropping
+  // the least recently used toolset instead of refusing the new one: what is loaded changes, never what the model may use.
+  const lastUse = new Map()
+  let calls = 0, evicted = []
+  const KEEP = new Set([...PERMANENT, 'plan', 'skills'])
+  function dropSoft(name) {
+    const at = loaded.indexOf(name)
+    if (at < 0 || KEEP.has(name)) return false
+    loaded.splice(at, 1); lastUse.delete(name)
+    const kept = new Set(loaded.flatMap(item => TOOLSETS[item]))
+    const own = new Set(Object.values(TOOLSETS).flat())
+    for (let i = active.length - 1; i >= 0; i--) if (own.has(active[i].name) && !kept.has(active[i].name)) active.splice(i, 1)
+    return true
+  }
+  function makeRoom(needed, keepName) {
+    const order = loaded.filter(name => !KEEP.has(name) && name !== keepName).sort((a, b) => (lastUse.get(a) ?? -1) - (lastUse.get(b) ?? -1))
+    for (const name of order) { if (active.length + needed <= limit) break; if (dropSoft(name)) evicted.push(name) }
+    return active.length + needed <= limit
+  }
   let limit = MAX_TOOLS // a lean run starts under a smaller limit and raises it as the task grows
   const allowedTool = name => scope === 'main' || DELEGATED_TOOLS.has(name)
   function addTool(name) {
@@ -133,9 +189,10 @@ function createToolsetManager({ definitions, ready, scope = 'main' }) {
     if (!tools.length) return 'NOT_ALLOWED'
     if (tools.some(tool => !byName.has(tool))) return 'NOT_READY'
     const missing = tools.filter(tool => !active.some(item => item.name === tool))
-    if (active.length + missing.length > limit) return 'TOOL_LIMIT'
+    if (active.length + missing.length > limit && (calls === 0 || !makeRoom(missing.length, name))) return 'TOOL_LIMIT'
     for (const tool of missing) addTool(tool)
     if (!loaded.includes(name)) loaded.push(name)
+    lastUse.set(name, calls)
     return 'LOADED'
   }
   // Removes loaded toolsets and adds another in one step, only when the result fits (M2-007). Tools still needed by
@@ -160,6 +217,19 @@ function createToolsetManager({ definitions, ready, scope = 'main' }) {
   }
   return {
     addTool, addToolset, replaceToolsets,
+    // A model call is about to be made (the run counts them for idleness).
+    tick: () => { calls++ },
+    // A tool was called: every loaded toolset holding it counts as used now.
+    touch: toolName => { for (const name of loaded) if (TOOLSETS[name]?.includes(toolName)) lastUse.set(name, calls) },
+    // Toolsets not used for `idle` model calls are dropped softly, only while more than `above` tools are loaded (a small set stays,
+    // so the prompt prefix stays stable for caching). Returns the dropped names.
+    dropIdle: (idle = 4, above = 14) => {
+      if (active.length <= above) return []
+      const out = loaded.filter(name => !KEEP.has(name) && calls - (lastUse.get(name) ?? 0) >= idle)
+      return out.filter(dropSoft)
+    },
+    // Toolsets dropped to make room since the last call (reported to the model in the tool result).
+    takeEvicted: () => { const out = evicted; evicted = []; return out },
     setLimit: value => { limit = Math.max(1, Math.min(MAX_TOOLS, value)) },
     // Toolsets the model unloaded in this run; they come back only through an explicit najd_tools_load.
     wasUnloaded: name => removed.has(name),
@@ -176,4 +246,4 @@ function createToolsetManager({ definitions, ready, scope = 'main' }) {
   }
 }
 
-module.exports = { TOOLSETS, TOOLSET_PURPOSE, describeToolsets, LOADABLE, DELEGATED_TOOLS, MAX_TOOLS, PROFILE_BASE_LIMIT, profiles, selectProfile, extraToolsets, createToolsetManager }
+module.exports = { TOOLSETS, TOOLSET_PURPOSE, describeToolsets, LOADABLE, DELEGATED_TOOLS, MAX_TOOLS, PROFILE_BASE_LIMIT, profiles, selectProfile, extraToolsets, createToolsetManager, isConversational }

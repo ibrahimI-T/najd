@@ -66,10 +66,10 @@ test('bytecode outside electron/ is not exempt from the clean-tree check (C79-01
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true })
   git('init', '-q'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'test')
-  fs.mkdirSync(path.join(root, 'browser-extension/__pycache__'), { recursive: true })
-  fs.writeFileSync(path.join(root, '.gitignore'), '__pycache__/\n'); fs.writeFileSync(path.join(root, 'browser-extension/a.js'), '')
+  fs.mkdirSync(path.join(root, 'browser-extension-v2/__pycache__'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.gitignore'), '__pycache__/\n'); fs.writeFileSync(path.join(root, 'browser-extension-v2/a.js'), '')
   git('add', '.'); git('commit', '-q', '-m', 'base')
-  fs.writeFileSync(path.join(root, 'browser-extension/__pycache__/a.cpython-314.pyc'), '')
+  fs.writeFileSync(path.join(root, 'browser-extension-v2/__pycache__/a.cpython-314.pyc'), '')
   assert.equal(gitState(root).clean, false)
 })
 test('a failed gate prints separate redacted tails of stdout and stderr (C81-01)', () => {

@@ -247,10 +247,13 @@ test('a tool call that arrives only as a streamed output item is read when the c
 test('agent calls of one conversation share a prompt cache key; other requests send none', async () => {
   const bodies = []
   const done = 'data: ' + JSON.stringify({ type: 'response.output_text.delta', delta: 'Hi' }) + '\n\n' + 'data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [] } }) + '\n\n'
-  const client = createChatGPTInference({ fetchImpl: async (_url, options) => { bodies.push(JSON.parse(options.body)); return new Response(done) } })
+  const headers = []
+  const client = createChatGPTInference({ fetchImpl: async (_url, options) => { bodies.push(JSON.parse(options.body)); headers.push(options.headers); return new Response(done) } })
   const turn = cacheKey => ({ accessToken: 'token', modelName: 'gpt-5.6-luna', history: [{ role: 'user', text: 'hello' }], agentTurn: { tools: [], input: [], cacheKey } })
   await client.chat(turn('867c6e31-474f-496a-91c7-185df3970c8c'))
   await client.chat(turn('bad key with spaces'))
   await client.chat({ accessToken: 'token', modelName: 'gpt-5.6-luna', history: [{ role: 'user', text: 'hello' }] })
   assert.deepEqual(bodies.map(body => body.prompt_cache_key), ['867c6e31-474f-496a-91c7-185df3970c8c', undefined, undefined])
+  // The service ties cache affinity to the session_id header (openai/codex client.rs); it carries the same key, and only that key.
+  assert.deepEqual(headers.map(item => item.session_id), ['867c6e31-474f-496a-91c7-185df3970c8c', undefined, undefined])
 })

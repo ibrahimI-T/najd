@@ -1,7 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
 import { buildSlashItems, filterSlash, slashQuery, GROUP_ORDER, type SlashContext } from './slashCommands'
-import { SlashMenu } from './SlashMenu'
 
 const calls: string[] = []
 const context = (over: Partial<SlashContext> = {}): SlashContext => ({
@@ -27,7 +25,7 @@ describe('slash commands', () => {
     const shown = filterSlash(buildSlashItems(context()), '')
     const order = shown.map(item => GROUP_ORDER.indexOf(item.group))
     expect(order).toEqual([...order].sort((a, b) => a - b))
-    expect(new Set(shown.map(item => item.group))).toEqual(new Set(GROUP_ORDER))
+    expect(new Set(shown.map(item => item.group))).toEqual(new Set(GROUP_ORDER.filter(group => group !== 'prompt'))) // no saved prompts in this context
     expect(shown.map(item => item.command)).toEqual(expect.arrayContaining(['new', 'read', 'models', 'access-full', 'profile-coding', 'effort-high', 'skill-writing']))
   })
   it('filters by what the command starts with first, then by label and keywords (Arabic too)', () => {
@@ -69,21 +67,28 @@ describe('slash commands', () => {
 })
 
 describe('slash menu', () => {
-  it('renders a listbox with options, the active one selected, groups and a reason for disabled ones', () => {
-    const items = buildSlashItems(context({ hasConversation: false }))
-    const html = renderToStaticMarkup(<SlashMenu id="slash-menu" items={filterSlash(items, '')} index={0} language="en" onChoose={vi.fn()} onHover={vi.fn()} />)
-    expect(html).toContain('role="listbox"'); expect(html).toContain('role="option"'); expect(html).toContain('aria-selected="true"'); expect(html).toContain('data-slash="new"')
-    expect(html).toContain('Chat'); expect(html).toContain('aria-disabled="true"'); expect(html).toContain('Send a message first')
+  it('keeps the active item first and gives a reason for disabled ones', () => {
+    const items = filterSlash(buildSlashItems(context({ hasConversation: false })), '')
+    expect(items[0].command).toBe('new')
+    expect(items.some(item => String(item.disabled).includes('Send a message first'))).toBe(true)
   })
-  it('renders nothing when there is nothing to show, and Arabic labels in Arabic', () => {
-    expect(renderToStaticMarkup(<SlashMenu id="m" items={[]} index={0} language="en" onChoose={vi.fn()} onHover={vi.fn()} />)).toBe('')
-    const html = renderToStaticMarkup(<SlashMenu id="m" items={filterSlash(buildSlashItems(context({ language: 'ar' })), 'new')} index={0} language="ar" onChoose={vi.fn()} onHover={vi.fn()} />)
-    expect(html).toContain('محادثة جديدة'); expect(html).toContain('المحادثة')
+  it('finds nothing for an unknown word, and labels Arabic in Arabic', () => {
+    expect(filterSlash(buildSlashItems(context()), 'zzzz-none')).toEqual([])
+    expect(filterSlash(buildSlashItems(context({ language: 'ar' })), 'new')[0].label).toBe('محادثة جديدة')
   })
 
   it('plugin commands put their text in the message box and never run anything', () => {
     const item = buildSlashItems(context()).find(entry => entry.command === 'setup-review-all')!
     expect(item.group).toBe('plugin')
     expect(item.action).toEqual({ kind: 'insert', text: 'Review  carefully. ' })
+  })
+})
+
+describe('saved prompts in the slash menu', () => {
+  it('lists the saved prompts first and finds them by any of their words', () => {
+    const actions = { newChat() {}, openPage() {}, setAccess() {}, pinProfile() {}, setEffort() {} }
+    const items = buildSlashItems({ language: 'ar', hasConversation: false, busy: false, skills: [], efforts: [], prompts: ['لخص لي تقرير المبيعات الأسبوعي', 'Draft a polite reply'], actions })
+    expect(filterSlash(items, '')[0].group).toBe('prompt')
+    expect(filterSlash(items, 'المبيعات')[0].action).toEqual({ kind: 'insert', text: 'لخص لي تقرير المبيعات الأسبوعي' })
   })
 })

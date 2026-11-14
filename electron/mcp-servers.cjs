@@ -4,6 +4,7 @@
 const fs = require('node:fs'), fsp = require('node:fs/promises'), path = require('node:path')
 const { replaceFile } = require('./atomic-file.cjs')
 const { createMcpClient } = require('./mcp-client.cjs')
+const { createMcpHttpClient, remoteUrl } = require('./mcp-http-client.cjs')
 const { classifyFailure, createHealthBook, readiness } = require('./mcp-health.cjs')
 const fail = code => Object.assign(new Error(code), { code })
 const ENV_PASS = ['SystemRoot', 'WINDIR', 'PATH', 'PATHEXT', 'COMSPEC', 'TEMP', 'TMP', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
@@ -29,7 +30,7 @@ function resolveCommand(command, envPath = process.env.PATH || '') {
   return null
 }
 
-function createMcpServers({ filePath, encryption, confirm, getBundledNode = () => null, clientVersion = '0.0.0', spawnImpl, env = process.env }) {
+function createMcpServers({ filePath, encryption, confirm, getBundledNode = () => null, clientVersion = '0.0.0', spawnImpl, env = process.env, oauth = null }) {
   if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || typeof confirm !== 'function') throw fail('INVALID_INPUT')
   let record = null, queue = Promise.resolve()
   const live = new Map()
@@ -65,6 +66,7 @@ function createMcpServers({ filePath, encryption, confirm, getBundledNode = () =
     const secrets = input.env ?? {}
     if (typeof secrets !== 'object' || Array.isArray(secrets) || Object.keys(secrets).length > 20 ||
         Object.entries(secrets).some(([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key) || typeof value !== 'string' || value.length > 4000 || /[\x00\r\n]/.test(value))) throw fail('INVALID_ENV')
+    if (input.url) return { name, command: '', args: [], cwd: null, secrets, url: remoteUrl(input.url) }
     let command = typeof input.command === 'string' ? input.command.trim() : ''
     if (command !== BUNDLED) {
       command = resolveCommand(command, env.PATH)
@@ -75,7 +77,7 @@ function createMcpServers({ filePath, encryption, confirm, getBundledNode = () =
     if (cwd && (!path.isAbsolute(cwd) || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())) throw fail('INVALID_CWD')
     return { name, command, args, cwd, secrets }
   }
-  const display = server => (server.command === BUNDLED ? 'NAJD Node' : server.command) + (server.args.length ? ' ' + server.args.map(arg => /\s/.test(arg) ? '"' + arg + '"' : arg).join(' ') : '')
+  const display = server => server.url || (server.command === BUNDLED ? 'NAJD Node' : server.command) + (server.args.length ? ' ' + server.args.map(arg => /\s/.test(arg) ? '"' + arg + '"' : arg).join(' ') : '')
 
   function launchSpec(server) {
     const base = {}
@@ -101,13 +103,13 @@ function createMcpServers({ filePath, encryption, confirm, getBundledNode = () =
 
   // Installed = the program resolves; connected = the live session answered; the rest comes from real calls (mcp-health.cjs).
   function toolReadiness(server, state, toolName) {
-    const installed = server.command === BUNDLED ? !!getBundledNode() : fs.existsSync(server.command)
+    const installed = !!server.url || (server.command === BUNDLED ? !!getBundledNode() : fs.existsSync(server.command))
     return readiness({ installed, connected: state?.state === 'connected', row: health.get(server.id, toolName) })
   }
   function view(server) {
     const state = live.get(server.id)
-    return { id: server.id, name: server.name, commandLine: display(server), cwd: server.cwd, envNames: server.envNames, enabled: server.enabled,
-      state: state?.state || 'disconnected', error: state?.error || null, serverInfo: state?.client?.info() || null,
+    return { id: server.id, name: server.name, ownerPackage: server.ownerPackage || null, commandLine: display(server), cwd: server.cwd, envNames: server.envNames, enabled: server.enabled,
+      state: state?.state || 'disconnected', error: state?.error || null, remote: !!server.url, serverInfo: state?.client?.info() || null,
       tools: state?.state === 'connected' ? state.tools.map(({ name, title, description, hints }) => ({ name, title, description, hints, readiness: toolReadiness(server, state, name) })) : [] }
   }
 
@@ -129,25 +131,50 @@ function createMcpServers({ filePath, encryption, confirm, getBundledNode = () =
     entry.ready = (async () => {
       try {
         if (signal?.aborted) throw fail('CANCELLED')
+        if (server.url) {
+          let token
+          const sealed = rec.secrets[server.id]
+          const stored = sealed ? JSON.parse(encryption.decryptString(Buffer.from(sealed, 'base64'))) : {}
+          token = stored.MCP_TOKEN
+          // An OAuth sign-in (R-080): the access token is read at each request and refreshed shortly before it expires.
+          if (stored.OAUTH && oauth) token = async () => {
+            const current = await sealedOAuth(server.id)
+            if (current?.expires_at && current.expires_at - 60000 < Date.now() && current.refresh_token) return (await refreshOAuth(server.id, current)).access_token
+            return current?.access_token
+          }
+          entry.client = createMcpHttpClient({ url: server.url, token, clientVersion })
+        } else {
         const spec = launchSpec(server)
         const spawnFn = spawnImpl || ((command, args, options) => require('node:child_process').spawn(command, args, { ...options, windowsVerbatimArguments: !!spec.verbatim }))
         entry.client = createMcpClient({ command: spec.command, args: spec.args, cwd: server.cwd || undefined, env: spec.env, clientVersion, spawnImpl: spawnFn,
           onExit: () => { if (live.get(id) === entry && entry.state !== 'disconnected') { entry.state = 'failed'; entry.error = 'SERVER_EXITED' } },
           onToolsChanged: () => { entry.client.listTools().then(tools => { entry.tools = tools }).catch(() => {}) } })
+        }
         await entry.client.start()
         entry.tools = await entry.client.listTools()
         if (signal?.aborted) throw fail('CANCELLED')
         entry.state = 'connected'
         if (!server.enabled) await serialize(async () => { server.enabled = true; await save() })
       } catch (error) {
-        entry.client?.stop(); entry.state = 'failed'
+        entry.client?.stop(); entry.state = 'failed'; entry.challenge = error?.challenge || ''
         entry.error = entry.cancelled || signal?.aborted ? 'CANCELLED'
-          : ['COMMAND_NOT_FOUND', 'START_FAILED', 'SERVER_EXITED', 'TIMEOUT', 'SERVER_ERROR', 'CREDENTIAL_UNAVAILABLE', 'RUNTIME_NOT_READY'].includes(error.code) ? error.code : 'START_FAILED'
+          : ['AUTH_REQUIRED', 'COMMAND_NOT_FOUND', 'START_FAILED', 'SERVER_EXITED', 'TIMEOUT', 'SERVER_ERROR', 'CREDENTIAL_UNAVAILABLE', 'RUNTIME_NOT_READY'].includes(error.code) ? error.code : 'START_FAILED'
       } finally { signal?.removeEventListener('abort', onAbort) }
       return view(server)
     })()
     return entry.ready
   }
+  // OAuth tokens of a remote server, sealed with the other secrets of that server (never in clear on disk).
+  async function sealedOAuth(id) {
+    const rec = await load(), sealed = rec.secrets[id]
+    if (!sealed) return null
+    try { return JSON.parse(encryption.decryptString(Buffer.from(sealed, 'base64'))).OAUTH || null } catch { throw fail('CREDENTIAL_UNAVAILABLE') }
+  }
+  async function storeOAuth(id, value) {
+    if (!encryption.isEncryptionAvailable()) throw fail('CREDENTIAL_UNAVAILABLE')
+    await serialize(async () => { const rec = await load(); rec.secrets[id] = encryption.encryptString(JSON.stringify({ OAUTH: value })).toString('base64'); await save() })
+  }
+  async function refreshOAuth(id, current) { const next = await oauth.refresh(current); await storeOAuth(id, next); return next }
   async function disconnect(id, { keepEnabled = false } = {}) {
     const rec = await load()
     const server = rec.servers.find(row => row.id === id)
@@ -163,13 +190,13 @@ function createMcpServers({ filePath, encryption, confirm, getBundledNode = () =
     async list() { return (await load()).servers.map(view) },
     // Adding requires the user's native confirmation of the exact command; a renderer cannot skip it. The agent's
     // install path (extensions.cjs) passes approvedInChat after the user approved the exact package in chat.
-    add: (input, { approvedInChat = false, signal } = {}) => serialize(async () => {
+    add: (input, { approvedInChat = false, signal, ownerPackage = null } = {}) => serialize(async () => {
       if (signal?.aborted) throw fail('CANCELLED')
       const rec = await load()
       if (rec.servers.length >= 500) throw fail('LIMIT_REACHED')
       const clean = validate(input)
       const id = slug(clean.name, new Set(rec.servers.map(row => row.id)))
-      const server = { id, name: clean.name, command: clean.command, args: clean.args, cwd: clean.cwd, envNames: Object.keys(clean.secrets), enabled: false, addedAt: new Date().toISOString() }
+      const server = { id, name: clean.name, command: clean.command, args: clean.args, cwd: clean.cwd, ...(ownerPackage ? { ownerPackage } : {}), ...(clean.url ? { url: clean.url } : {}), envNames: Object.keys(clean.secrets), enabled: false, addedAt: new Date().toISOString() }
       if (!approvedInChat && !await confirm({ name: server.name, commandLine: display(server), cwd: server.cwd, envNames: server.envNames })) return { status: 'cancelled' }
       if (server.envNames.length) {
         if (!encryption?.isEncryptionAvailable?.()) throw fail('CREDENTIAL_UNAVAILABLE')
@@ -179,6 +206,18 @@ function createMcpServers({ filePath, encryption, confirm, getBundledNode = () =
       rec.servers.push(server); await save()
       return { status: 'added', server: view(server) }
     }),
+    // Sign in to a remote server with OAuth in the owner's browser, keep the tokens sealed, then connect (R-080).
+    signIn: async (id, { signal } = {}) => {
+      if (!oauth) throw fail('UNSUPPORTED')
+      const rec = await load(), server = rec.servers.find(row => row.id === id)
+      if (!server) throw fail('NOT_FOUND')
+      if (!server.url) throw fail('OAUTH_NOT_REMOTE')
+      const challenge = live.get(id)?.challenge || ''
+      await disconnect(id, { keepEnabled: true }).catch(() => {})
+      const tokens = await oauth.signIn(server.url, { challenge, signal })
+      await storeOAuth(id, tokens)
+      return connect(id, { signal })
+    },
     remove: async id => {
       await disconnect(id).catch(() => {})
       return serialize(async () => {

@@ -1,7 +1,7 @@
 const { redactText, redactBlock } = require('./redact.cjs')
 const MAX_EVENTS = 160
 // A model's thinking or an advisor's note: several lines, longer than a detail line.
-const THINKING_CHARS = 6000
+const THINKING_CHARS = 12000
 const limitOf = type => type === 'reasoning.text' ? THINKING_CHARS : type === 'reasoning.summary' ? 240 : 160
 const types = new Set(['task.started','task.completed','task.failed','task.cancelled','task.unknown_effect','approval.requested','approval.resolved','tool.started','tool.completed','tool.failed','reasoning.summary','reasoning.text'])
 const object = value => value && typeof value === 'object' && !Array.isArray(value)

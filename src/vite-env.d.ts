@@ -37,7 +37,7 @@ interface NajdTask {
 // Side panel data for one conversation (najd:agent:context).
 interface NajdAgentContext {
   runs: (NajdRunReceipt & { runId: string; conversationId: string; state: string; at: number; provider: string | null; modelName: string | null; contextWindow: number | null })[]
-  totals: { runs: number; input: number | null; output: number | null; total: number | null; cached: number | null; modelCalls: number; toolCalls: number; partial: boolean }
+  totals: { runs: number; input: number | null; output: number | null; total: number | null; cached: number | null; modelCalls: number; toolCalls: number; partial: boolean; tools?: Record<string, number>; skills?: string[] }
   outputs: { conversationId: string; runId: string | null; kind: string; path: string | null; libraryId: string | null; name: string; at: number }[]
   jobs: { jobId: string; conversationId: string | null; state: string; prompt: string | null; updatedAt: number; output: { path: string; libraryId: string | null } | null }[]
   profiles: { id: string; title: { ar: string; en: string }; toolsets: string[] }[]
@@ -46,7 +46,7 @@ interface NajdAgentContext {
 // Main-owned run receipt (agent platform M1): null token fields were not reported by the provider.
 interface NajdRunUsage { input: number | null; output: number | null; total: number | null; cached: number | null; modelCalls: number; partial: boolean }
 interface NajdRunReceipt {
-  outcome: string; profile: string; toolsets: string[]; usage: NajdRunUsage; toolCalls: number
+  outcome: string; profile: string; toolsets: string[]; usage: NajdRunUsage; toolCalls: number; tools?: Record<string, number>; skills?: string[]
   request: { instructionsBytes: number | null; toolsBytes: number | null; turnBytes: number | null; historyBytes?: number | null; images: number } | null
 }
 
@@ -124,7 +124,11 @@ interface NajdProviderPolicy {
 }
 interface NajdProviderLimits { policy: NajdProviderPolicy; cloudAttempts: number; activeRequests: number }
 
+// Voice input (R-080).
+interface NajdVoiceApi { status(): Promise<{ available: boolean }>; transcribe(audio: Uint8Array, mime: string, seconds: number): Promise<{ text: string }> }
+type NajdFilePreview = { kind: 'text'; name: string; size: number; language: string; text: string; truncated: boolean; extracted?: boolean } | { kind: 'image'; name: string; size: number; mime: string; dataUrl: string } | { kind: 'other'; name: string; size: number }
 interface Window {
+  najdVoice?: NajdVoiceApi
   najdSkills?: {
     list(): Promise<NajdInstructionSkill[]>
     setEnabled(id: string, enabled: boolean): Promise<void>
@@ -239,9 +243,10 @@ interface Window {
   }
   najdMcpServers?: {
     list(): Promise<NajdMcpServer[]>
-    add(input: { name: string; command: string; args: string[]; cwd: string; env: Record<string, string> }): Promise<{ status: 'added' | 'cancelled'; server?: NajdMcpServer }>
+    add(input: { name: string; command: string; url?: string; args: string[]; cwd: string; env: Record<string, string> }): Promise<{ status: 'added' | 'cancelled'; server?: NajdMcpServer }>
     remove(id: string): Promise<unknown>
     connect(id: string): Promise<NajdMcpServer>
+    signIn(id: string): Promise<NajdMcpServer>
     disconnect(id: string): Promise<NajdMcpServer>
     pickCommand(): Promise<string | null>
     programs(): Promise<{ npx: boolean; uvx: boolean }>
@@ -255,13 +260,14 @@ interface Window {
     addFiles(id: string): Promise<{ base: NajdKnowledgeBase; added: number; failed: { name: string; error: string }[] } | null>
     removeItem(id: string, assetId: string): Promise<NajdKnowledgeBase>
   }
-  najdAgent?: { onTaskChanged?(listener: (taskId: string, sequence: number) => void): () => void; context(conversationId: string): Promise<NajdAgentContext>; tools?(): Promise<NajdAgentTool[]>; toolsets?(): Promise<Record<string, boolean>>; profiles?(): Promise<{ id: string; title: { ar: string; en: string }; toolsets: string[] }[]>; openOutput?(conversationId: string, filePath: string, mode: 'open' | 'reveal'): Promise<boolean> }
+  najdAgent?: { onTaskChanged?(listener: (taskId: string, sequence: number) => void): () => void; context(conversationId: string): Promise<NajdAgentContext>; tools?(): Promise<NajdAgentTool[]>; toolsets?(): Promise<Record<string, boolean>>; profiles?(): Promise<{ id: string; title: { ar: string; en: string }; toolsets: string[] }[]>; openOutput?(conversationId: string, filePath: string, mode: 'open' | 'reveal'): Promise<boolean>; previewOutput?(conversationId: string, filePath: string): Promise<NajdFilePreview> }
   najdAccounts?: { list(): Promise<NajdAccount[]>; add(input: { label: string; siteUrl: string; username: string; password: string; autoLogin: boolean }): Promise<NajdAccount>; setAutoLogin(id: string, enabled: boolean): Promise<NajdAccount>; remove(id: string): Promise<boolean>; pending(): Promise<NajdAccount[]>; retry(): Promise<NajdAccount[]>; acknowledge(id: string): Promise<NajdAccount[]> }
   najdAbout?: { notices(): Promise<{ version: string; text: string }> }
   najdGateway?: {
     status(): Promise<NajdGatewayStatus>
     start(): Promise<NajdGatewayStatus>
     stop(): Promise<NajdGatewayStatus>
+    repair(): Promise<NajdGatewayStatus>
   }
   najdProviders?: {
     limits(): Promise<NajdProviderLimits>
@@ -292,14 +298,17 @@ interface Window {
     create(): Promise<NajdSession>
     append(id: string, role: NajdMessage['role'], text: string, taskId?: string, assetIds?: string[]): Promise<NajdSession>
     delete(id: string): Promise<boolean>
-    export(id: string): Promise<{ saved: boolean }>
+    rename?(id: string, title: string): Promise<{ id: string; title: string }>
+    export(id: string): Promise<{ saved: boolean; format?: 'text' | 'markdown' | 'pdf' }>
     saveBlock(input: { text: string; extension: string; name?: string }): Promise<{ saved: boolean; name?: string }>
     openFile?(input: { path: string; mode: 'open' | 'reveal' }): Promise<{ opened: boolean }>
+    previewFile?(input: { path: string }): Promise<NajdFilePreview>
+    speak?(text: string, language: 'ar' | 'en'): Promise<{ voice: string; audio: string }>
   }
   najdCore?: {
     recovery?(): Promise<NajdActionRecovery>
     reconcileAction?(id: string, resolution: 'done' | 'not-done' | 'dismiss'): Promise<{ id: string; state: string }>
-    startTask(text: string, intentId: string, provider?: NajdProviderId, modelName?: string, history?: Pick<NajdMessage, 'role' | 'text'>[], reasoningEffort?: NajdReasoningPreference, assetIds?: string[], conversationId?: string, profile?: string, accessMode?: 'ask' | 'approve' | 'full', browserContext?: { title: string; url: string; selection: string }, askId?: string): Promise<NajdTask>
+    startTask(text: string, intentId: string, provider?: NajdProviderId, modelName?: string, history?: Pick<NajdMessage, 'role' | 'text'>[], reasoningEffort?: NajdReasoningPreference, assetIds?: string[], conversationId?: string, profile?: string, accessMode?: 'ask' | 'approve' | 'full', browserContext?: NajdBrowserContext, askId?: string): Promise<NajdTask>
     getTask(taskId: string): Promise<NajdTask>
     respondApproval?(approvalId: string, decision: 'ALLOW_ONCE' | 'ALLOW_TASK' | 'DENY'): Promise<NajdTask>
     cancelTask?(taskId: string): Promise<NajdTask>
@@ -330,7 +339,7 @@ interface Window {
     unpair(id?: string, instance?: string): Promise<NajdBrowserStatus>
     rotateCode(): Promise<string | null>
     openDemo(language: 'ar' | 'en'): Promise<void>
-    onAsk(listener: (ask: { id: string; text: string; page: { url: string; title: string; selection: string } | null }) => void): () => void
+    onAsk(listener: (ask: NajdBrowserAsk) => void): () => void
     activeAsks(): Promise<{ askId: string; taskId: string }[]>
     askSaved(taskId: string): Promise<boolean>
     onAskCancelled(listener: (value: { id: string; taskId: string | null }) => void): () => void
@@ -374,6 +383,9 @@ interface NajdChannelStatus { tokenSaved: boolean; enabled: boolean; state: 'sto
 interface NajdUnionMember { provider: string; model: string; enabled?: boolean }
 interface NajdUnionPreset { label?: string; enabled: boolean; references: NajdUnionMember[]; aggregator: { provider: string; model: string } }
 interface NajdUnionConfig { default: string | null; presets: Record<string, NajdUnionPreset> }
+// A question typed in the browser extension's side panel, and the page details that go beside it (untrusted website data).
+type NajdBrowserContext = { title: string; url: string; selection: string; text?: string; lang?: string; attachment?: { name: string; text: string }; tabs?: { url: string; title: string; text: string }[] }
+type NajdBrowserAsk = { id: string; text: string; page: NajdBrowserContext | null; conversationId?: string | null; model?: { provider: string; model: string } | null; pictures?: { id: string; name: string }[] }
 type NajdProviderId = string   // the catalog grows (see electron/provider-catalog.json); ids are validated in the main process
 type NajdReasoningPreference = 'auto' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 interface NajdProvider {
@@ -403,7 +415,7 @@ interface NajdPackStatus {
   packageCount: number
   cleanupPending: boolean
 }
-interface NajdProviderModel { id: string; label: string; contextWindow?: number | null; efforts: NajdReasoningPreference[] }
+interface NajdProviderModel { id: string; label: string; contextWindow?: number | null; contextSource?: string | null; contextEstimated?: boolean; efforts: NajdReasoningPreference[] }
 
 type NajdCapabilityId = 'najd-read-document' | 'najd-find-documents' | 'najd-list-apps'
 interface NajdInstructionSkill {
@@ -438,6 +450,7 @@ interface NajdSkillSource {
   }[]
 }
 interface NajdMcpServer {
+  remote?: boolean
   id: string; name: string; commandLine: string; cwd: string | null; envNames: string[]; enabled: boolean
   state: 'disconnected' | 'connecting' | 'connected' | 'failed'; error: string | null
   serverInfo: { name: string; version: string; protocolVersion: string } | null

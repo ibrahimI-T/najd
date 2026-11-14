@@ -36,3 +36,4 @@ downloads/
 .playwright-cli/
 .superpowers/
 *.crx
+.vue-check/

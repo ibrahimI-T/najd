@@ -53,7 +53,11 @@ const BOOTSTRAP = 'import runpy, site, sys\npack, kit, script = sys.argv[1], sys
 // and stoppable (M2-R5-002); returns its process id.
 // pack: the Office and design pack (office-pack.cjs) or null; a run with a ready pack holds a lease on it until the
 // host reports the run's job closed (M3-003).
-function createPythonTools({ getPython, host, checkFolder, createFolder, stateRoot, logs, journal, timeoutMs = TIMEOUT_MS, hostReady = async () => true, adopt = null, pack = null, kitPath = '' }) {
+// kind "blender" (R-080) runs the same pipeline with Blender's own Python: the script is passed to blender.exe in background mode with
+// factory settings, and its exit code is the script's (--python-exit-code). Approval, journal, private folder, job object, deadline and
+// the list of files created are the same as for Python.
+function createPythonTools({ getPython, host, checkFolder, createFolder, stateRoot, logs, journal, timeoutMs = TIMEOUT_MS, hostReady = async () => true, adopt = null, pack = null, kitPath = '', kind = 'python' }) {
+  const blender = kind === 'blender', label = blender ? 'Blender' : 'Python', approvalTool = blender ? 'najd-blender-run' : 'najd-python-run', operation = blender ? 'blender.run' : 'python.run'
   if (typeof getPython !== 'function' || typeof host?.invokeHost !== 'function' || typeof checkFolder !== 'function' || !path.isAbsolute(stateRoot || '')) throw fail('INVALID_INPUT')
   // Private folders kept for families not seen closed: folder -> host job id (M2-R6-003).
   const retained = new Map()
@@ -66,11 +70,11 @@ function createPythonTools({ getPython, host, checkFolder, createFolder, stateRo
       if (!python) throw fail('RUNTIME_NOT_READY')
       const folder = await checkFolder(typeof cwd === 'string' ? cwd : '')
       if (typeof requestApproval !== 'function') throw fail('PERMISSION_DENIED')
-      const action = journal ? await journal.prepare({ intentId: sha(randomUUID()).slice(0, 48), operation: 'python.run',
-        target: ('Python in ' + folder.absolute).replace(/[\x00-\x1f]+/g, ' ').slice(0, 1000), changeHash: sha(JSON.stringify([folder.absolute, code])) }) : null
+      const action = journal ? await journal.prepare({ intentId: sha(randomUUID()).slice(0, 48), operation,
+        target: (label + ' in ' + folder.absolute).replace(/[\x00-\x1f]+/g, ' ').slice(0, 1000), changeHash: sha(JSON.stringify([folder.absolute, code])) }) : null
       let decision
-      try { decision = await requestApproval('najd-python-run', { path: folder.absolute, cwd: folder.absolute,
-        summary: 'Run this Python code on your computer (120 s limit)' + (folder.exists ? '' : '; its folder will be created') + '. It can read and change files the program can reach.' +
+      try { decision = await requestApproval(approvalTool, { path: folder.absolute, cwd: folder.absolute,
+        summary: (blender ? 'Run this Blender script on your computer (' + Math.round(timeoutMs / 1000) + ' s limit)' : 'Run this Python code on your computer (' + Math.round(timeoutMs / 1000) + ' s limit)') + (folder.exists ? '' : '; its folder will be created') + '. It can read and change files the program can reach.' +
           (pack?.describe().state === 'ready' ? ' Office and design pack: available.' : ''), preview: code }) }
       catch (failure) { if (action) await journal.cancel(action.id).catch(() => {}); throw failure }
       if (decision !== 'ALLOW_ONCE') { if (action) await journal.decide(action.id, action.nonce, 'DENY'); return { status: 'denied_by_user', note: 'The code was not run.' } }
@@ -82,7 +86,7 @@ function createPythonTools({ getPython, host, checkFolder, createFolder, stateRo
       // A private folder in protected application data holds the script and the interpreter's own state. A folder kept
       // for a family not seen closed is removed only once the host no longer runs that family; folders left by earlier
       // sessions (whose host and jobs ended with them) are removed a day later (M2-R6-003).
-      const runs = path.join(stateRoot, 'python-runs')
+      const runs = path.join(stateRoot, blender ? 'blender-runs' : 'python-runs')
       let hosted = null
       if (retained.size) { const list = await host.invokeHost('najd.process.list', {}).catch(() => null); hosted = Array.isArray(list) ? list : null }
       for (const entry of await fsp.readdir(runs, { withFileTypes: true }).catch(() => [])) {
@@ -102,12 +106,12 @@ function createPythonTools({ getPython, host, checkFolder, createFolder, stateRo
       try {
         await fsp.mkdir(path.join(home, 'Roaming'), { recursive: true }); await fsp.mkdir(path.join(home, 'Local'), { recursive: true })
         await fsp.writeFile(script, code)
-        lease = pack ? await pack.acquire().catch(() => null) : null
+        lease = pack && !blender ? await pack.acquire().catch(() => null) : null
         if (lease) await fsp.writeFile(path.join(home, 'najd_bootstrap.py'), BOOTSTRAP)
         if (action) { await journal.claim(action.id); claimed = true }
         if (!folder.exists) await createFolder(folder.absolute)
         before = await listFiles(folder.absolute)
-        log = logs.createExternal({ conversationId, runId, kind: 'python' })
+        log = logs.createExternal({ conversationId, runId, kind: blender ? 'blender' : 'python' })
       } catch (failure) {
         lease?.release()
         await fsp.rm(home, { recursive: true, force: true }).catch(() => {})
@@ -123,7 +127,8 @@ function createPythonTools({ getPython, host, checkFolder, createFolder, stateRo
       // -I ignores PYTHON* variables, so UTF-8 mode is set with -X utf8: output in any language is written as UTF-8,
       // which the host decodes as UTF-8 (M2-R6-002).
       let started, receiving = null
-      try { started = await host.invokeHost('najd.process.start', { command: '& ' + quote(python) + ' -I -B -X utf8 ' + launch, cwd: folder.absolute, log: log.file, env, timeoutMs }, 20000,
+      const command = blender ? '& ' + quote(python) + ' --background --factory-startup --python-exit-code 1 --python ' + quote(script) : '& ' + quote(python) + ' -I -B -X utf8 ' + launch
+      try { started = await host.invokeHost('najd.process.start', { command, cwd: folder.absolute, log: log.file, env, timeoutMs }, 20000,
         { signal, onDispatch: instance => { receiving = instance }, check: async () => (await checkFolder(typeof cwd === 'string' ? cwd : '').catch(() => null))?.absolute === folder.absolute ? null : 'PATH_NOT_ALLOWED' }) }
       catch (failure) {
         await fsp.rm(home, { recursive: true, force: true }).catch(() => {})

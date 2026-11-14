@@ -1,0 +1,7 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>NAJD</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}#drag{position:absolute;inset:0 0 auto 0;height:26px;-webkit-app-region:drag}img{position:absolute;inset:8px;width:80px;height:80px;border-radius:50%;animation:b 3s ease-in-out infinite}@keyframes b{50%{transform:translateY(-4px)}}@media (prefers-reduced-motion:reduce){img{animation:none}}</style></head>
+<body><div id="drag"></div><img id="pet" alt="NAJD">
+<script>const icon=new URLSearchParams(location.search).get('icon');document.getElementById('pet').src=icon;let n=0;document.getElementById('pet').addEventListener('dblclick',()=>{document.title='open'+(++n)})</script>
+</body></html>

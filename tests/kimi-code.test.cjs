@@ -35,3 +35,12 @@ test('Kimi Code maps provider failures without returning provider body or key', 
   const client = createKimiCodeClient({ fetchImpl: async () => new Response('secret response', { status: 401 }) })
   await assert.rejects(client.chat({ apiKey: 'sk-kimi-secret', modelName: 'k3', history }), { code: 'PROVIDER_REJECTED' })
 })
+
+test('a Kimi refusal keeps its reason for the error log, and a too-long request is CONTEXT_LIMIT (live 2026-11-09)', async () => {
+  const { createKimiCodeClient } = require('../electron/kimi-code.cjs')
+  const request = { apiKey: 'sk-kimi-FAKE-TEST-KEY', modelName: 'k3', history: [{ role: 'user', text: 'hi' }] }
+  const refused = createKimiCodeClient({ fetchImpl: async () => new Response('{"error":{"message":"Invalid request: tools[3].function.parameters is not a valid JSON schema","type":"invalid_request_error"}}', { status: 400 }) })
+  await assert.rejects(refused.chat(request), error => error.code === 'PROVIDER_REJECTED' && error.status === 400 && /not a valid JSON schema/.test(error.detail) && !String(error.detail).includes('sk-kimi'))
+  const tooLong = createKimiCodeClient({ fetchImpl: async () => new Response('{"error":{"message":"Invalid request: Your request exceeded model token limit: 262144","type":"invalid_request_error","code":"context_length_exceeded"}}', { status: 400 }) })
+  await assert.rejects(tooLong.chat(request), { code: 'CONTEXT_LIMIT' })
+})

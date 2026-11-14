@@ -63,12 +63,15 @@ test('the web builder guide names exactly the shipped pack skills, and they ship
   assert.match(fs.readFileSync(path.join(__dirname, '../.gitattributes'), 'utf8'), /^skill-packs\/\*\* -text\r?$/m)
 })
 
-test('the model reads pack files through najd_skills_read and main routes them only for pack skills', () => {
+test('najd_skills_read remains file-aware but main excludes the retired pack surface', () => {
   const runtime = fs.readFileSync(path.join(__dirname, '../electron/agent-runtime.cjs'), 'utf8')
   assert.match(runtime, /\['najd_skills_read', 'skills\.read', [^\]]*\{ id: \{ type: 'string' \}, file: \{ type: 'string' \}/)
-  assert.match(runtime, /typeof args\.file === 'string' && args\.file \? args\.file\.slice\(0, 300\) : undefined\); break/)
+  // The read is followed by recording the skill for the usage panel (R-080) before the break.
+  assert.match(runtime, /typeof args\.file === 'string' && args\.file \? args\.file\.slice\(0, 300\) : undefined\)\s*\n\s*\/\/ Recorded for the usage panel[^\n]*\n[^\n]*skillsRead\.add\([^\n]*\} break/)
   const main = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8')
-  assert.match(main, /createSkillSurface\(\{ bundled: bundledSkills, external: externalSkills, packs: skillPacks \}\)/)
+  assert.match(main, /createSkillSurface\(\{ bundled: bundledSkills, packages:/)
+  assert.match(main, /legacy: false/)
+  assert.doesNotMatch(main, /createSkillSurface\(\{ bundled: bundledSkills, external: externalSkills, packs: skillPacks/)
 })
 
 test('after an upgrade, a settings file saved before the packs existed still has every pack on, and they cannot be turned off (C85-01)', async t => {

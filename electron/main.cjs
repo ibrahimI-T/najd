@@ -6,12 +6,8 @@ registerVideoScheme(protocol)
 if (process.argv.includes('--najd-prepare-runtime')) { require('./prepare-runtime.cjs').prepareRuntimeMain(); return }
 // One authoritative writer for this profile's sessions, permissions and capability registry.
 if (!app.requestSingleInstanceLock()) { app.exit(0); return }
-app.on('second-instance', () => {
-  const window = BrowserWindow.getAllWindows()[0]
-  if (!window) return
-  if (window.isMinimized()) window.restore()
-  window.show(); window.focus()
-})
+// Starting NAJD again shows its main window (showMainWindow picks NAJD's own window, never the desktop pet or the control overlay).
+app.on('second-instance', () => showMainWindow())
 const path = require('node:path')
 const fs = require('node:fs/promises')
 // Library files that open with their default program: documents, sheets, slides, PDF, pictures and plain text (never anything that runs;
@@ -19,12 +15,15 @@ const fs = require('node:fs/promises')
 const LIBRARY_OPENABLE = new Set(['.pdf', '.docx', '.xlsx', '.csv', '.pptx', '.txt', '.md', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
 const { createNajdCore } = require('./najd-core.cjs')
 const { createBackgroundMode } = require('./background-mode.cjs')
-const { createChatLinkOpener, openWorkspaceFile } = require('./chat-links.cjs')
+const { createChatLinkOpener, openWorkspaceFile, insideWorkspace } = require('./chat-links.cjs')
+const { previewFile } = require('./file-preview.cjs')
+const { createSpeech } = require('./speech.cjs')
+const chatExport = require('./chat-export.cjs')
 const { createWindowState } = require('./window-state.cjs')
 const { createDiagnostics, createErrorLog } = require('./diagnostics.cjs')
 const { createStartupGuard } = require('./startup-guard.cjs')
 const { createQuitWatchdog } = require('./quit-watchdog.cjs')
-const { createBrowserBridge } = require('./browser-bridge.cjs')
+const { createBrowserBridge, stepsFromEvents, markOutdated } = require('./browser-bridge.cjs')
 const { createSessionStore } = require('./session-store.cjs')
 const { createMemoryStore, readMemoryBackup } = require('./memory-store.cjs')
 const { createPersonalityStore, personalityPrompt } = require('./personality.cjs')
@@ -92,6 +91,7 @@ const { createExecLogs } = require('./exec-logs.cjs')
 const { createPythonTools } = require('./python-tools.cjs')
 const { createProcessTools } = require('./process-tools.cjs')
 const { createDesktopTools } = require('./desktop-tools.cjs')
+const { createControlOverlay, withControlOverlay } = require('./workstation/control-overlay.cjs')
 const { createStartApps } = require('./start-apps.cjs')
 const { createExtensions } = require('./extensions.cjs')
 const { createKnowledgeBases } = require('./knowledge-bases.cjs')
@@ -111,9 +111,9 @@ const { createProcessLifecycle } = require('./process-lifecycle.cjs')
 const { fitAgentHistory } = require('./agent-context.cjs')
 const { createInstructionSkills } = require('./instruction-skills.cjs')
 const { createSkillSurface, najdGuideRows } = require('./skill-surface.cjs')
-const upstreamSkillBundle = require('./upstream-skills.json')
-// NAJD's own instruction guides (electron/najd-skills/*.md, M3-9), checked by digest like the bundled upstream skills.
-const najdSkillRows = najdGuideRows(path.join(__dirname, 'najd-skills'))
+// R-070: the active procedure layer is the workstation bundle plus verified marketplace packages.
+// Former upstream, skill-pack and learned-skill stores are not exposed to the model.
+const workstationSkillRows = najdGuideRows(path.join(__dirname, 'workstation', 'skills'))
 // Open-source design skill packs (skill-packs/, resources/skill-packs when installed), checked against their manifest.
 const { createSkillPacks } = require('./skill-packs.cjs')
 const skillPacks = createSkillPacks({ root: app.isPackaged ? path.join(process.resourcesPath, 'skill-packs') : path.join(__dirname, '..', 'skill-packs') })
@@ -170,7 +170,16 @@ async function plainChat(request) {
 }
 async function chatWithPersonality(request) {
   if (request.readPath !== undefined) return plainChat(request)
+  // Owner 2026-11-09: save on simple things without making the model weaker, and never save on a local model.
+  // A local model (its tokens cost nothing) always gets the full setup. Any other model follows its window: a large window gets the
+  // balanced setup (full tool descriptions and every ability, only what this request needs sent up front, the rest one step away);
+  // only a genuinely small window starts lean. Before this, every request was forced lean (first-sentence tool descriptions, fewer
+  // tools, capped results), which dropped guidance the model needed. Explicit context preferences and internal requests keep theirs.
+  // The window is the one limit a local model keeps (R-081): the full setup needs room, so a local window under FULL_LOCAL_MIN tokens
+  // follows its window like any other (live 2026-11-09: a 4K local server could not take the full setup and every run stopped at CONTEXT_LIMIT).
   await providers.ensureWindow(request.provider, request.modelName).catch(() => {}) // a local server's real window, before the tier is chosen
+  const FULL_LOCAL_MIN = 16000
+  if (!request.contextMode && !request.systemPrompt && providers.isLocal?.(request.provider) && providers.inputBudget(request.provider, request.modelName) >= FULL_LOCAL_MIN * 3) request = { ...request, contextMode: 'full' }
   const tier = tierOf(providers.inputBudget(request.provider, request.modelName), request.contextMode)
   // Which kind of work this is, so a balanced run sends only the craft lines of the default instructions that apply (selection is repeated by the runtime).
   const guessed = tier.balanced ? selectProfile({ text: request.text, pinned: request.profile, last: request.conversationId ? await runReceipts.lastProfile(request.conversationId).catch(() => null) : null }).profile : 'general'
@@ -295,7 +304,7 @@ function syncAsk(taskId) {
   const state = ASK_STATES[task?.state]
   if (!state) return
   const finished = ['done', 'failed', 'cancelled'].includes(state)
-  browserBridge.updateAsk(askId, { state, needsApproval: state === 'waiting_approval',
+  browserBridge.updateAsk(askId, { state, needsApproval: state === 'waiting_approval', steps: stepsFromEvents(task.activity?.events),
     ...((state === 'done' || task.state === 'UNKNOWN_EFFECT') && typeof task.output === 'string' ? { output: task.output } : {}),
     ...(state === 'failed' ? { progress: typeof task.errorCode === 'string' ? task.errorCode : task.state } : {}) })
   if (finished) {
@@ -303,6 +312,17 @@ function syncAsk(taskId) {
     // A completed answer stays recoverable until the renderer confirms it saved it to the conversation (a reload in between must not lose it).
     if ((state === 'done' || task.state === 'UNKNOWN_EFFECT') && typeof task.output === 'string' && task.output) unsavedAsks.set(taskId, askId)
   }
+}
+// Models offered in the browser panel's selector: those of the providers that are set up, at most 30 each. A provider whose list fails is left out.
+let modelCache = { at: 0, list: null }
+async function browserModels() {
+  if (modelCache.list && Date.now() - modelCache.at < 5 * 60 * 1000) return modelCache.list
+  const list = []
+  for (const item of (await providers.catalog()).filter(entry => entry.configured)) {
+    try { for (const model of (await providers.models(item.id)).slice(0, 30)) list.push({ provider: item.id, providerName: item.name, model: model.id, name: model.label || model.id }) } catch {}
+  }
+  modelCache = { at: Date.now(), list }
+  return list
 }
 // Questions from the browser waiting for the app to confirm it has them (see onAsk).
 const pendingAsks = new Map()
@@ -321,6 +341,8 @@ const notifyTaskChanged = ({ taskId, conversationId, sequence }) => {
   const owner = taskOwners.get(taskId)
   if (owner && !owner.isDestroyed()) owner.send('najd:task:changed', { taskId, sequence })
   try { syncAsk(taskId) } catch {}
+  // The browser banner ends with the task that was using the browser.
+  try { if (browserBridge?.sessionOwner() === taskId && ['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN_EFFECT'].includes(core.getTask(taskId)?.state)) browserBridge.endSession(taskId) } catch {}
   // A paired phone hears when work on the computer finishes or waits for permission (channel-gateway.cjs).
   try { channels?.taskChanged({ taskId, conversationId }) } catch {}
 }
@@ -386,6 +408,7 @@ function withWindowSender(event, operation, track = true) {
 let backgroundMode = null
 let startupGuard = null
 let channels = null
+let workstation = null
 let confirmHealthy = () => {}
 let generationError = null
 const RELEASES_PAGE = 'https://github.com/ibrahimI-T/najd/releases'
@@ -394,7 +417,9 @@ const RELEASES_PAGE = 'https://github.com/ibrahimI-T/najd/releases'
 const COMMUNITY_LINKS = { community: 'https://discord.gg/QAbYVEdcE', website: 'https://najdagent.si', author: 'https://discord.gg/QAbYVEdcE' }
 const openChatLink = url => createChatLinkOpener({ shell, workspaceRoot: path.join(app.getPath('documents'), 'NAJD') })(url).catch(() => false)
 function showMainWindow() {
-  let window = BrowserWindow.getAllWindows()[0]
+  // The main window, never the first window found: the desktop pet, the control overlay or a hidden helper window may come first
+  // (live 2026-11-09: a second start showed the hidden "NAJD CONTROL" overlay and the main window stayed hidden in the tray).
+  let window = BrowserWindow.getAllWindows().find(item => !item.isDestroyed() && appWindows.has(item))
   if (!window) { createWindow(); return }
   if (window.isMinimized()) window.restore()
   window.show(); window.focus()
@@ -419,6 +444,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // A task keeps following its progress and saving its answer while NAJD is behind other windows (live test 2026-11-09: a
+      // finished 3D task stayed on "Working" until the window was shown, because Chromium throttled the hidden page's timers).
+      backgroundThrottling: false,
       additionalArguments: app.commandLine.hasSwitch('remote-debugging-port') ? ['--najd-automation'] : [],
       preload: path.join(__dirname, 'preload.cjs')
     }
@@ -430,6 +458,12 @@ function createWindow() {
     event.preventDefault()
     window.hide()
     backgroundMode.hidden()
+  })
+  // Closing the last main window for real (not hidden to the tray) quits NAJD, even while the desktop pet or a hidden helper window
+  // (page preview, video frames) is open: those never keep the app alive (UI crawl 2026-11-09: the pet kept NAJD running, unreachable).
+  window.on('closed', () => {
+    if (process.platform === 'darwin' || quitting) return
+    if (!BrowserWindow.getAllWindows().some(other => other !== window && !other.isDestroyed() && appWindows.has(other))) app.quit()
   })
   // A link the user clicks in a chat: web addresses open in the default browser; a file link opens only for a web page or picture inside the NAJD workspace.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -522,21 +556,29 @@ app.whenReady().then(() => {
     return gateway.start()
   }))
   ipcMain.handle('najd:gateway:stop', event => withWindowSender(event, () => gateway.stop()))
+  // Repair: stop the gateway (its files are in use), unpack its component again from the packed archive, start it again.
+  ipcMain.handle('najd:gateway:repair', event => withWindowSender(event, async () => {
+    if (quitting) throw mainError('CANCELLED')
+    if (!bundleRuntime) throw mainError('INVALID_INPUT')
+    await gateway.stop().catch(() => {})
+    await bundleRuntime.repair('gateway')
+    return gateway.start()
+  }))
   credentials = createCredentialStore({ filePath: path.join(app.getPath('userData'), 'najd-data', 'credentials.json'), encryption: safeStorage })
   chatGPT = createChatGPTAuth({
     store: createChatGPTStore({ filePath: path.join(app.getPath('userData'), 'najd-data', 'chatgpt.json'), encryption: safeStorage }),
     inference: createChatGPTInference(), openBrowser: url => shell.openExternal(url)
   })
-  providers = createProviderService({ directory: path.join(app.getPath('userData'), 'najd-data'), encryption: safeStorage, chatGPT, ollama, kimiStore: credentials })
+  providers = createProviderService({ directory: path.join(app.getPath('userData'), 'najd-data'), encryption: safeStorage, chatGPT, ollama, kimiStore: credentials, log: (kind, text) => errorLog.record(kind, text) })
   capabilities = createCapabilityRegistry({ directory: path.join(app.getPath('userData'), 'najd-data/capabilities'), core })
   const connectorPrefs = path.join(app.getPath('userData'), 'najd-data', 'connectors.json')
   mcpConnectors = createMcpConnectors({ node: windowsNode, preference: createConnectorPreference({ filePath: connectorPrefs }) })
   // The local Windows companion starts connected unless the user turned it off.
   void mcpConnectors.resume()
-  const bundledSkills = createInstructionSkills({ filePath: path.join(app.getPath('userData'), 'najd-data/instruction-skills.json'), bundle: { ...upstreamSkillBundle, skills: [...upstreamSkillBundle.skills, ...najdSkillRows, ...skillPacks.rows()] } })
+  const bundledSkills = createInstructionSkills({ filePath: path.join(app.getPath('userData'), 'najd-data/instruction-skills.json'), bundle: { version: 1, skills: workstationSkillRows, notices: [] } })
   const externalSkills = createExternalSkills({ directory: path.join(app.getPath('userData'), 'najd-data/external-skills'), owners: () => pluginStore.ownedSkills() })
   // One skill surface for the model and UI; bundled and user-installed skills keep separate stores (electron/skill-surface.cjs).
-  const instructionSkills = createSkillSurface({ bundled: bundledSkills, external: externalSkills, packs: skillPacks })
+  const instructionSkills = createSkillSurface({ bundled: bundledSkills, packages: { rows: () => workstation?.packages.skillRows() ?? [], read: (id, offset, limit) => workstation.packages.readSkill(id, offset, limit) }, legacy: false })
   // Plugins from outside (plugins.cjs). Install and removal are explicit actions of the owner in Settings; the agent installs only after an in-chat approval.
   const pluginStore = createPlugins({ directory: path.join(app.getPath('userData'), 'najd-data/plugins'), skills: externalSkills })
   const githubUrl = url => { if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+/.test(url) || url.length > 500) throw mainError('INVALID_INPUT'); return url }
@@ -568,10 +610,11 @@ app.whenReady().then(() => {
   projects = createProjectStore({ filePath: path.join(app.getPath('userData'), 'najd-data', 'projects.json') })
   knowledgeBases = createKnowledgeBases({ filePath: path.join(app.getPath('userData'), 'najd-data', 'knowledge-bases.json'), library })
   // External MCP servers are added only by the user in Settings, after a native confirmation of the exact command.
-  mcpServers = createMcpServers({ filePath: path.join(app.getPath('userData'), 'najd-data', 'mcp-servers.json'), encryption: safeStorage, clientVersion: app.getVersion(),
+  // OAuth sign-in for remote MCP servers opens the service's own page in the owner's browser (R-080).
+  mcpServers = createMcpServers({ oauth: require('./mcp-oauth.cjs').createMcpOAuth({ openExternal: url => shell.openExternal(url) }), filePath: path.join(app.getPath('userData'), 'najd-data', 'mcp-servers.json'), encryption: safeStorage, clientVersion: app.getVersion(),
     getBundledNode: () => najdNode(),
     confirm: async ({ name, commandLine, cwd, envNames }) => {
-      const parent = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+      const parent = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows().find(item => !item.isDestroyed() && appWindows.has(item))
       const detail = [commandLine, cwd ? 'Folder / المجلد: ' + cwd : '', envNames.length ? 'Secrets / أسرار: ' + envNames.join(', ') : ''].filter(Boolean).join('\n\n')
       const { response } = await dialog.showMessageBox(parent, { type: 'warning', buttons: ['Add and allow / أضف واسمح', 'Cancel / إلغاء'], defaultId: 1, cancelId: 1, noLink: true,
         title: 'NAJD AGENT', message: 'Add MCP server "' + name + '"? / إضافة خادم MCP؟',
@@ -603,7 +646,13 @@ app.whenReady().then(() => {
     // reloading, has no listener yet). If that never happens the question fails visibly instead of waiting forever.
     onAsk: async ask => {
       if (!BrowserWindow.getAllWindows().some(item => !item.isDestroyed() && !item.webContents.isDestroyed())) return false
-      const entry = { payload: { id: ask.id, text: ask.text, page: ask.page }, since: Date.now() }
+      // A follow-up from the panel continues the conversation of the earlier question's task; a model chosen in the panel was checked by the bridge.
+      let conversationId = null
+      if (ask.after?.taskId) { try { conversationId = core.getTask(ask.after.taskId)?.conversationId || null } catch {} }
+      // A picture of the page goes into NAJD's library like a pasted picture; if that fails the question is refused, never sent without it.
+      let pictures = []
+      if (ask.picture) { try { const asset = await importPictureBytes(ask.picture.name, ask.picture.bytes); pictures = [{ id: asset.id, name: asset.name }] } catch { return false } }
+      const entry = { payload: { id: ask.id, text: ask.text, page: ask.page, conversationId, model: ask.model || null, pictures }, since: Date.now() }
       const send = () => {
         if (!pendingAsks.has(ask.id)) return
         // Kept until its task is created (or it is stopped), so a renderer reload while it waits cannot lose it; 30 minutes at most.
@@ -625,7 +674,15 @@ app.whenReady().then(() => {
       dropPendingAsk(id)
       if (taskId) { try { core.cancelTask(taskId) } catch {} }
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('najd:ask:cancelled', { id, taskId: taskId || null })
-    }
+    },
+    // The panel's model selector: models of the providers that are set up (names only, cached for five minutes).
+    onModels: () => browserModels(),
+    // "/" in the panel: the skills that are switched on (names and descriptions only).
+    onSkills: async () => (await instructionSkills.list()).filter(row => row && row.enabled !== false).map(row => ({ id: row.id, name: row.name, description: row.description || '' })),
+    // Cancel on the browser banner stops the task that is using the browser.
+    onSessionStop: ({ taskId }) => { try { core.cancelTask(taskId) } catch {} },
+    // "Review in NAJD" from the panel: the app comes forward; approvals are decided only there.
+    onAskShow: () => { try { showMainWindow() } catch {} }
   })
   let officePack = null
   const agentCatalog = createAgentCatalog({ registry: capabilities, connectors: mcpConnectors, getTools: () => agentRuntime.describeTools(), getSkills: () => instructionSkills.list(), getMcpTools: () => mcpServers.tools(),
@@ -662,7 +719,9 @@ app.whenReady().then(() => {
     classifyCommand, checkFolder: input => workspaceTools.checkFolder(input), createFolder: target => workspaceTools.createFolder(target),
     workspace: workspaceTools.workspace, executionEnv: () => workspaceTools.executionEnv(), available: hostReady })
   // Desktop windows through the desktop host's UI Automation (M2d); files must be in the workspace or a granted folder.
-  const desktopTools = createDesktopTools({ host: gatedHost, journal: actionJournal, available: hostReady, startApps: createStartApps(),
+  // The glowing frame and NAJD CONTROL badge shown while NAJD works on the desktop (owner request 2026-11-07).
+  const controlOverlay = createControlOverlay({ BrowserWindow, screen: require('electron').screen })
+  const desktopTools = createDesktopTools({ host: gatedHost, journal: actionJournal, available: hostReady, startApps: createStartApps(), pointerMode: () => workstation?.pointerMode?.() ?? 'follow',
     resolveReadable: input => workspaceTools.resolve(input).absolute,
     captureDirectory: path.join(app.getPath('documents'), 'NAJD', '.najd', 'captures'), saveToLibrary: file => library.importFile(file),
     // The model receives a JPEG data URL that always fits the context's image limit: quality, then size, step down
@@ -675,7 +734,8 @@ app.whenReady().then(() => {
         const sized = scale < 1 ? image.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), quality: 'good' }) : image
         for (const quality of [85, 70, 55]) {
           const url = 'data:image/jpeg;base64,' + sized.toJPEG(quality).toString('base64')
-          if (url.length <= maxUrl) return url
+          // The size the model sees, so a point it picks on the image maps back to the window (visual route, 2026-11-10).
+          if (url.length <= maxUrl) return { url, ...sized.getSize() }
         }
       }
       return null
@@ -719,6 +779,12 @@ app.whenReady().then(() => {
     host: gatedHost, hostReady, checkFolder: input => workspaceTools.checkFolder(input), createFolder: target => workspaceTools.createFolder(target),
     adopt: details => processTools.adopt(details),
     getPython: async () => (await engineInfo())?.python || null })
+  // Android apps (R-080): a web app folder built into a signed debug APK with the owner's SDK (fixed commands, approved in chat).
+  const androidBuilder = require('./android-builder.cjs').createAndroidBuilder({ stateRoot: path.join(app.getPath('userData'), 'najd-data', 'android'), checkFolder: input => workspaceTools.checkFolder(input) })
+  // 3D (R-080): the owner's installed Blender through the same approved, journaled, job-contained pipeline as Python (5 minutes).
+  const blenderTools = createPythonTools({ kind: 'blender', timeoutMs: 300000, stateRoot: path.join(app.getPath('userData'), 'najd-data', 'engines'), logs: execLogs, journal: actionJournal,
+    host: gatedHost, hostReady, checkFolder: input => workspaceTools.checkFolder(input), createFolder: target => workspaceTools.createFolder(target),
+    adopt: details => processTools.adopt(details), getPython: async () => require('./blender.cjs').findBlender() })
   // A slide picture as the gray grid the playback check compares (BGRA bitmap from Electron's nativeImage).
   const grayFromImage = image => { const sized = image.resize({ width: 256, height: 144, quality: 'good' }), bgra = sized.toBitmap(), gray = new Uint8Array(256 * 144); for (let p = 0; p < gray.length; p++) gray[p] = Math.round(0.114 * bgra[p * 4] + 0.587 * bgra[p * 4 + 1] + 0.299 * bgra[p * 4 + 2]); return gray }
   // najd_office_review (M3-8): Office runs only on private copies that passed the scan, never on the user's file.
@@ -788,7 +854,7 @@ app.whenReady().then(() => {
       }
       throw mainError('CAPTURE_FAILED')
     } })
-  agentRuntime = createAgentRuntime({ contextLog, toolbox: createToolbox({ resolveReadable: input => workspaceTools.resolve(input).absolute }), webPreview, extensions, knowledge: knowledgeBases, catalog: agentCatalog, library, skills: instructionSkills, connectors: mcpConnectors, workspace: workspaceTools, web: hermesTools,
+  agentRuntime = createAgentRuntime({ workstation: { act: (args, context) => workstation.act(args, context) }, contextLog, toolbox: createToolbox({ resolveReadable: input => workspaceTools.resolve(input).absolute }), webPreview, extensions: null, knowledge: knowledgeBases, catalog: agentCatalog, library, skills: instructionSkills, connectors: mcpConnectors, workspace: workspaceTools, web: hermesTools,
     memory: { remember: input => learning.remember(input), forget: input => learning.forget(input) }, journal: actionJournal,
     // Earlier conversations, read-only and bounded; the current conversation is excluded (it is already the history).
     chats: {
@@ -831,7 +897,7 @@ app.whenReady().then(() => {
           return ok
         }
       })() }),
-    media, python: pythonTools, logs: execLogs, processes: processTools, desktop: desktopTools, pack: officePack, officeReview })
+    media, python: pythonTools, blender: blenderTools, android: androidBuilder, logs: execLogs, processes: processTools, desktop: withControlOverlay(desktopTools, controlOverlay, { pointerMode: () => workstation?.pointerMode?.() ?? 'follow' }), pack: officePack, officeReview })
   // Authorized accounts: the window can list them, add one (the password goes straight to the secret store and is never returned),
   // switch auto sign-in and revoke. No handler ever returns a password.
   ipcMain.handle('najd:accounts:list', event => withWindowSender(event, () => credentialVault.list()))
@@ -973,12 +1039,7 @@ app.whenReady().then(() => {
     const base = ids.length ? await knowledgeBases.addItems(id, ids) : await knowledgeBases.get(id)
     return { base, added: ids.length, failed }
   }))
-  const sourceDiscovery = ['openclaw', 'hermes'].map(source => {
-    const rows = upstreamSkillBundle.skills.filter(row => row.source === source)
-    return { source, sourceRevision: rows[0].sourceRevision, limited: false, skills: rows.map(row => ({
-      ...skillMetadata(row.body, source), source, sourceRevision: row.sourceRevision, relativePath: row.relativePath, digest: row.digest
-    })) }
-  })
+  const sourceDiscovery = []
   ipcMain.handle('najd:capabilities:list', event => withWindowSender(event, () => capabilities.list()))
   ipcMain.handle('najd:capabilities:sources', event => withWindowSender(event, () => sourceDiscovery))
   ipcMain.handle('najd:capabilities:install', (event, id) => withWindowSender(event, () => capabilities.install(id)))
@@ -991,6 +1052,7 @@ app.whenReady().then(() => {
   ipcMain.handle('najd:mcp-servers:add', (event, input) => withWindowSender(event, () => mcpServers.add(input)))
   ipcMain.handle('najd:mcp-servers:remove', (event, id) => withWindowSender(event, () => mcpServers.remove(id)))
   ipcMain.handle('najd:mcp-servers:connect', (event, id) => withWindowSender(event, () => mcpServers.connect(id)))
+  ipcMain.handle('najd:mcp-servers:signin', (event, id) => withWindowSender(event, () => mcpServers.signIn(String(id || ''))))
   ipcMain.handle('najd:mcp-servers:disconnect', (event, id) => withWindowSender(event, () => mcpServers.disconnect(id)))
   // Which common MCP launchers exist on this computer (for the server templates).
   ipcMain.handle('najd:mcp-servers:programs', event => withWindowSender(event, () => ({ npx: !!resolveCommand('npx'), uvx: !!resolveCommand('uvx') })))
@@ -1013,6 +1075,15 @@ app.whenReady().then(() => {
   ipcMain.handle('najd:channels:pair', event => withWindowSender(event, () => channels.startPairing()))
   ipcMain.handle('najd:channels:unpair', (event, chatId) => withWindowSender(event, () => channels.unpair(Number(chatId))))
   void channels.start().catch(() => {})
+  const previousStop = stopBackgroundJobs
+  stopBackgroundJobs = async () => { await workstation?.stop().catch(() => {}); await previousStop() }
+  // The workstation services (catalog, packages, Task Center, Remote Control, built-in browser). Health keys answer only for checks that are real.
+  workstation = require('./workstation/ipc.cjs').registerWorkstation({ electron: require('electron'), ipcMain, app, withWindowSender, directory: path.join(app.getPath('userData'), 'najd-data', 'workstation'), core, sessions,
+    mcpServers, iconPath: path.join(__dirname, '../build/icon.png'), mainWindow: () => BrowserWindow.getAllWindows().find(window => !window.isDestroyed() && appWindows.has(window)) || null,
+    broadcast: (channel, value) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, value) },
+    health: () => require('./workstation/health.cjs').workstationHealth({ procedures: workstationSkillRows.map(row => row.id), officePack: () => officePack.status(), browserBridge: () => browserBridge?.status?.(),
+      gateway: () => gateway.status(), blender: () => !!require('./blender.cjs').findBlender(), android: () => !!require('./android-builder.cjs').findToolchain(), windowsInstalled: () => windowsNode.installed(), webAvailable: () => hermesTools.available(), mediaServices: () => media.services(), mcpTools: () => mcpServers.tools() })
+  })
   const memory = createMemoryStore(path.join(app.getPath('userData'), 'najd-data', 'memory.json'))
   personality = createPersonalityStore(path.join(app.getPath('userData'), 'najd-data', 'personality.json'))
   learning = createLearning({ directory: path.join(app.getPath('userData'), 'najd-data', 'learning') })
@@ -1062,6 +1133,12 @@ app.whenReady().then(() => {
   }))
   ipcMain.handle('najd:updates:releases', event => withWindowSender(event, () => shell.openExternal(RELEASES_PAGE)))
   ipcMain.handle('najd:links:open', (event, name) => withWindowSender(event, () => Object.hasOwn(COMMUNITY_LINKS, name) ? shell.openExternal(COMMUNITY_LINKS[name]).then(() => true) : false))
+  // Voice input (R-080): whether the owner's OpenAI key is set, and the transcription of a recording they just made.
+  ipcMain.handle('najd:voice:status', event => withWindowSender(event, async () => ({ available: (await media.services().catch(() => [])).includes('openai-transcription') })))
+  ipcMain.handle('najd:voice:transcribe', (event, audio, mime, seconds) => withWindowSender(event, () => {
+    if (!(audio instanceof Uint8Array)) throw mainError('INVALID_INPUT')
+    return media.dictate({ audio: Buffer.from(audio), mime: String(mime || ''), seconds: Number(seconds) })
+  }))
   ipcMain.handle('najd:diagnostics:export', event => withWindowSender(event, async () => {
     const os = require('node:os')
     const diagnostics = createDiagnostics({
@@ -1116,7 +1193,7 @@ app.whenReady().then(() => {
     const state = await agentRuntime?.toolsetReadiness().catch(() => null)
     return toolsView({ ready: name => (state ? state[name] === true : true) })
   }))
-  ipcMain.handle('najd:graph:usage', event => withWindowSender(event, () => contextLog.recent(60)))
+  ipcMain.handle('najd:graph:usage', event => withWindowSender(event, () => contextLog.recent(300)))
   ipcMain.handle('najd:learning:settings', (event, input) => withWindowSender(event, () => learning.setSettings(input)))
   ipcMain.handle('najd:learning:accept', (event, kind, id) => withWindowSender(event, () => learning.accept(kind, id)))
   ipcMain.handle('najd:learning:reject', (event, kind, id) => withWindowSender(event, () => learning.reject(kind, id)))
@@ -1179,6 +1256,7 @@ app.whenReady().then(() => {
     const askId = typeof request?.askId === 'string' && /^[a-f0-9]{24}$/.test(request.askId) ? request.askId : null
     if (askId) { const known = browserBridge?.getAsk(askId); if (!known || known.cancelled || ['done', 'failed', 'cancelled'].includes(known.state)) throw mainError('ASK_CANCELLED'); if (known.taskId) throw mainError('ASK_STARTED') }
     const started = core.startTask(request)
+    workstation?.noteModel(request)
     if (askId && started?.id) { browserBridge.updateAsk(askId, { taskId: started.id, state: 'running' }); askOfTask.set(started.id, askId); dropPendingAsk(askId) }
     claimTask(event, started?.id)
     return started
@@ -1205,6 +1283,14 @@ app.whenReady().then(() => {
     const failure = await shell.openPath(filePath)
     if (failure) throw mainError('OPEN_FAILED')
     return true
+  }))
+  // A preview inside NAJD of a file this conversation produced (owner request 2026-11-10): text up to 512 KB, pictures up to 8 MB.
+  // Same rule as opening: only a path recorded as this conversation's output; nothing else on the disk can be read this way.
+  ipcMain.handle('najd:outputs:preview', (event, conversationId, filePath) => withWindowSender(event, async () => {
+    if (typeof conversationId !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(conversationId) || typeof filePath !== 'string' || filePath.length > 1000) throw mainError('INVALID_INPUT')
+    const outputs = await conversationOutputs.outputs(conversationId)
+    if (!outputs.some(item => item.path === filePath)) throw mainError('NOT_FOUND')
+    return previewFile(filePath)
   }))
   // Side panel data for one conversation (agent platform M1): runs, totals, outputs, jobs and profiles.
   // Authoritative toolset readiness, from the same per-tool readiness the runtime uses: a toolset is ready only when
@@ -1337,6 +1423,8 @@ app.whenReady().then(() => {
     memoryService?.scheduleIndex() // earlier conversations are indexed in the background a moment after they change
     return appended
   }))
+  // Rename a conversation (the owner's own title; session-store.cjs validates it).
+  ipcMain.handle('najd:session:rename', (event, id, title) => withWindowSender(event, () => sessions.renameSession(id, title)))
   ipcMain.handle('najd:session:delete', (event, id) => withWindowSender(event, async () => {
     // Deleting is serialized against new work for that conversation: it is marked closing first (new tasks are
     // refused), a task still running blocks it, and then its background commands are stopped. If any cannot be shown
@@ -1353,26 +1441,34 @@ app.whenReady().then(() => {
     if (typeof id === 'string' && /^[A-Za-z0-9-]{1,80}$/.test(id)) await Promise.allSettled([runReceipts.removeConversation(id), conversationOutputs.removeConversation(id)])
     return result
   }))
+  // Export: text, Markdown or PDF (electron/chat-export.cjs); an existing file is never overwritten.
   ipcMain.handle('najd:session:export', (event, id) => withWindowSender(event, async () => {
     const session = await sessions.getSession(id)
     const picked = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
       title: 'Export NAJD chat',
       defaultPath: `NAJD-chat-${session.createdAt.slice(0, 10)}.txt`,
-      filters: [{ name: 'Text', extensions: ['txt'] }]
+      filters: [{ name: 'Text', extensions: ['txt'] }, { name: 'Markdown', extensions: ['md'] }, { name: 'PDF', extensions: ['pdf'] }]
     })
     if (picked.canceled || !picked.filePath) return { saved: false }
-    if (path.extname(picked.filePath).toLowerCase() !== '.txt') throw mainError('INVALID_INPUT')
-    const lines = ['NAJD AGENT', session.title || 'Chat', `Created: ${session.createdAt}`, '']
-    for (const message of session.messages) {
-      lines.push(`${message.role === 'user' ? 'You' : 'NAJD'} — ${message.createdAt}`, message.text, '')
-    }
+    const format = chatExport.FORMATS[path.extname(picked.filePath).toLowerCase()]
+    if (!format) throw mainError('INVALID_INPUT')
+    let data
+    if (format === 'pdf') {
+      // The page is rendered offscreen with no script, no network and no preload, then printed to PDF.
+      const page = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'najd-export' } })
+      try {
+        page.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'file://*/*'] }, (_details, callback) => callback({ cancel: true }))
+        await page.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(chatExport.asPrintableHtml(session)))
+        data = await page.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'default' } })
+      } catch { throw mainError('EXPORT_FAILED') } finally { page.destroy() }
+    } else data = format === 'markdown' ? chatExport.asMarkdown(session) : chatExport.asText(session)
     try {
-      await fs.writeFile(picked.filePath, lines.join('\n'), { encoding: 'utf8', flag: 'wx' })
+      await fs.writeFile(picked.filePath, data, typeof data === 'string' ? { encoding: 'utf8', flag: 'wx' } : { flag: 'wx' })
     } catch (error) {
       if (error.code === 'EEXIST') throw mainError('EXPORT_EXISTS')
       throw mainError('EXPORT_FAILED')
     }
-    return { saved: true }
+    return { saved: true, format }
   }))
   // A file path written in a reply: opened or shown in Explorer, only inside the NAJD workspace (electron/chat-links.cjs).
   ipcMain.handle('najd:session:openFile', (event, input) => withWindowSender(event, async () => {
@@ -1380,6 +1476,17 @@ app.whenReady().then(() => {
     const target = typeof input?.path === 'string' && input.path.length <= 1024 ? input.path : null
     if (!target) throw mainError('INVALID_INPUT')
     return { opened: await openWorkspaceFile({ shell, workspaceRoot: path.join(app.getPath('documents'), 'NAJD') }, target, mode).catch(() => false) }
+  }))
+  // Read a reply aloud with Windows' own voices (R-083). Text only, bounded in speech.cjs; the audio comes back as a WAV data URL.
+  const speech = createSpeech({ scriptPath: unpacked(path.join(__dirname, 'speech.ps1')), tempRoot: app.getPath('temp') })
+  ipcMain.handle('najd:speech:synthesize', (event, text, language) => withWindowSender(event, () => speech.synthesize(text, language)))
+  // A file path written in a reply, previewed inside NAJD: only a file inside the NAJD workspace (same rule as opening it).
+  ipcMain.handle('najd:session:previewFile', (event, input) => withWindowSender(event, async () => {
+    const target = typeof input?.path === 'string' && input.path.length <= 1024 && path.isAbsolute(input.path) ? input.path : null
+    if (!target) throw mainError('INVALID_INPUT')
+    const real = await insideWorkspace(target, path.join(app.getPath('documents'), 'NAJD'))
+    if (!real) throw mainError('NOT_FOUND')
+    return previewFile(real)
   }))
   // Saves a code block (or a prompt or diagram) from a reply where the owner chooses; nothing is written without the save dialog.
   ipcMain.handle('najd:session:saveBlock', (event, input) => withWindowSender(event, async () => {
@@ -1395,9 +1502,15 @@ app.whenReady().then(() => {
     try { await fs.writeFile(picked.filePath, text, 'utf8') } catch { throw mainError('EXPORT_FAILED') }
     return { saved: true, name: path.basename(picked.filePath) }
   }))
+  // The versions of the extensions NAJD ships (read once from their manifests), to tell the owner when the browser runs an older copy.
+  let shipped = null
+  const shippedExtensions = () => shipped ||= Object.fromEntries(['browser-extension-v2'].map(folder => {
+    try { const version = String(JSON.parse(require('node:fs').readFileSync(path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, '..'), folder, 'manifest.json'), 'utf8')).version); return [version.split('.')[0], version] } catch { return [folder, null] }
+  }))
   ipcMain.handle('najd:browser:status', event => withWindowSender(event, () => ({
-    ...browserBridge.status(),
-    extensionPath: app.isPackaged ? path.join(process.resourcesPath, 'browser-extension') : path.join(__dirname, '..', 'browser-extension')
+    ...(status => ({ ...status, links: markOutdated(status.links, shippedExtensions()) }))(browserBridge.status()),
+    // NAJD Browser 2.x (browser-extension-v2) is the extension NAJD ships.
+    extensionPath: app.isPackaged ? path.join(process.resourcesPath, 'browser-extension-v2') : path.join(__dirname, '..', 'browser-extension-v2')
   })))
   // The link code is shown only when the user opens it in Settings > Browser.
   ipcMain.handle('najd:browser:pairingCode', event => withWindowSender(event, () => browserBridge.pairingCode()))
@@ -1491,5 +1604,12 @@ app.on('before-quit', event => {
   // Order matters (APR-017): background jobs stop, the core drains (receipts included), then the stores flush.
   const ordered = stopBackgroundJobs().catch(() => {}).then(() => core.shutdown()).catch(() => {})
     .then(() => Promise.allSettled([conversationOutputs.flush(), runReceipts.flush()]))
-  void Promise.allSettled([ordered, updates?.dispose(), runtimeService?.shutdown(), hermesTools?.stop(), channels?.dispose(), stopLearning, mcpServers?.stopAll(), hermes.stop(), gateway?.stop(), windowsNode?.stop(), browserBridge?.stop()]).then(() => app.quit())
+  // Each part is timed; a quit slower than 10 s is recorded with the parts that took longest (diagnostics, 2026-11-09).
+  const began = Date.now(), took = {}
+  const timed = (name, work) => Promise.resolve(work).finally(() => { took[name] = Date.now() - began })
+  const parts = { ordered, updates: updates?.dispose(), runtime: runtimeService?.shutdown(), hermesTools: hermesTools?.stop(), channels: channels?.dispose(), learning: stopLearning,
+    mcp: mcpServers?.stopAll(), hermes: hermes.stop(), gateway: gateway?.stop(), windowsNode: windowsNode?.stop(), browserBridge: browserBridge?.stop() }
+  void Promise.allSettled(Object.entries(parts).map(([name, work]) => timed(name, work)))
+    .then(() => { if (Date.now() - began > 10000) errorLog.record('quit', 'slow quit ' + (Date.now() - began) + ' ms: ' + Object.entries(took).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, ms]) => name + ' ' + ms + ' ms').join(', ')) })
+    .then(() => app.quit())
 })

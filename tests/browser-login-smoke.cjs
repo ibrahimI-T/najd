@@ -1,7 +1,7 @@
 // Real browser check of authorized sign-in (R-063): Microsoft Edge with a temporary profile (never the user's), the unpacked NAJD extension,
 // a local test site with real cookies and sessions, and the real NAJD bridge, browser tool and credential vault (in-memory secret store).
 // Covers sign-in, session reuse in the same browser profile, session expiry, wrong password, a password-change form, revocation and the
-// extension's own refusals. Test accounts only. Usage: npm run smoke:browser-login
+// extension's own refusals. Test accounts only. Usage: npm run smoke:browser-login (1.x) and npm run smoke:browser-login-v2 (NAJD Browser 2.x).
 const assert = require('node:assert/strict')
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), http = require('node:http')
 const { createBrowserBridge } = require('../electron/browser-bridge.cjs')
@@ -10,6 +10,7 @@ const { createCredentialVault } = require('../electron/credential-vault.cjs')
 
 const { edge, sleep, launch, pairThroughPanel } = require('./helpers/edge-extension.cjs')
 const PASSWORD = 'Test-Account-pw-7731'
+const v2 = process.argv.includes('--v2')
 
 async function main() {
   if (!edge) { console.log('SKIP: Microsoft Edge not found'); return }
@@ -57,12 +58,13 @@ async function main() {
   const run = async (args, decision = 'ALLOW_ONCE') => { const out = await tools.run({ action: '', target: '', text: '', submit: false, ...args }, { requestApproval: async () => decision }); results.push(out)
     if (process.env.NAJD_SMOKE_DEBUG) console.error(args.action, args.target.slice(-12), '->', out.status, out.page?.title, out.page?.url)
     return out }
-  const browser = await launch({ debugPort: 39234 })
+  const browser = await launch({ debugPort: 39234, ...(v2 ? { source: path.join(__dirname, '..', 'browser-extension-v2') } : {}) })
   try {
     const panel = await browser.openPanel()
     await pairThroughPanel(bridge, panel)
     for (let i = 0; i < 60 && !bridge.status().connected; i++) await sleep(250)
     assert.equal(bridge.status().connected, true, 'extension linked')
+    if (v2) assert.match(String(bridge.status().links?.find(link => link.connected)?.version), /^2./, 'NAJD Browser 2.x is the linked extension')
     panel.close()
 
     const account = await vault.add({ label: 'Test site', siteUrl: base, username: 'tester@example.com', password: PASSWORD, autoLogin: true })
@@ -135,7 +137,7 @@ async function main() {
     assert.equal((await run({ action: 'login', target: wrong.id })).status, 'no_account')
     assert.equal(secrets.size, 0, 'no saved password remains')
     assert.ok(!JSON.stringify(results).includes(PASSWORD) && !JSON.stringify(results).includes('wrong-password'), 'no tool result ever carried a password')
-    console.log('PASS: real Edge (temporary profile): authorized sign-in, session reuse, expiry and re-sign-in, password-change form refused, extension refusals, wrong password, revocation; no password in any tool result.')
+    console.log((v2 ? 'PASS (NAJD Browser 2.x)' : 'PASS') + ': real Edge (temporary profile): authorized sign-in, session reuse, expiry and re-sign-in, password-change form refused, extension refusals, wrong password, revocation; no password in any tool result.')
   } finally {
     await bridge.stop(); server.close()
     await browser.stop()

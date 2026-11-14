@@ -1,0 +1,21 @@
+// Refresh only the rebuilt desktop host in the generated runtime bundle.
+const fs = require('node:fs/promises'), path = require('node:path')
+const { writeZip, walk } = require('./zip-writer.cjs')
+const { replaceFile } = require('../electron/atomic-file.cjs')
+async function main() {
+  const root = path.resolve(__dirname, '..')
+  const source = path.join(root, '.runtimes/windows-node-host')
+  const packed = path.join(root, 'build/bundle/najd-runtime-packed')
+  const manifestPath = path.join(packed, 'bundle.json')
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'))
+  const component = manifest.components.find(item => item.id === 'desktop-host')
+  if (!component || component.file !== 'desktop-host.zip') throw Error('Unexpected desktop bundle')
+  await fs.access(path.join(source, component.entry))
+  const temporary = path.join(packed, 'desktop-host-' + Date.now() + '.zip.tmp')
+  const result = await writeZip(temporary, walk(source))
+  await replaceFile(temporary, path.join(packed, component.file))
+  Object.assign(component, result)
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  console.log(JSON.stringify(component))
+}
+main().catch(error => { console.error(error); process.exitCode = 1 })

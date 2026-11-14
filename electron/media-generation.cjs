@@ -57,6 +57,24 @@ function createMediaGeneration({ getOpenAIKey, workspace, saveToLibrary, jobs = 
     services: async () => (await getOpenAIKey().catch(() => null)) ? ['openai-images', 'openai-video', 'openai-transcription'] : [],
     describe: { image: 'OpenAI Images (gpt-image-1), billed to your OpenAI API account', video: 'OpenAI video (sora-2), billed to your OpenAI API account' },
 
+    // Voice input (R-080): what the owner just recorded with the composer's microphone, transcribed with their OpenAI key. Pressing the
+    // button is the owner's own request, so there is no approval card; nothing is sent until they stop the recording. At most 5 minutes
+    // and 25 MB; webm/ogg (Opus) or wav as recorded by the window.
+    async dictate({ audio, mime, seconds }, { signal } = {}) {
+      const types = { 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/wav': 'wav' }
+      const base = String(mime || '').split(';')[0].trim().toLowerCase()
+      if (!Buffer.isBuffer(audio) || audio.length < 200 || audio.length > 25 * 1024 * 1024 || !types[base] || !Number.isFinite(seconds) || seconds <= 0 || seconds > 300) throw fail('INVALID_INPUT')
+      const apiKey = await key()
+      const form = new FormData()
+      form.append('model', 'gpt-4o-mini-transcribe')
+      form.append('response_format', 'json')
+      form.append('file', new Blob([audio], { type: base }), 'voice.' + types[base])
+      const response = await request('/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + apiKey }, body: form }, signal)
+      const body = await response.json().catch(() => null)
+      if (typeof body?.text !== 'string') throw fail('SERVICE_UNAVAILABLE')
+      return { text: body.text.trim().slice(0, 20000) }
+    },
+
     // Speech to text for a video's stored sound track (paid; approved per request).
     async transcribe({ wav, seconds, name }, { requestApproval, signal }) {
       if (!Buffer.isBuffer(wav) || wav.length <= 44 || wav.length > 25 * 1024 * 1024 || !Number.isFinite(seconds) || seconds <= 0) throw fail('INVALID_INPUT')

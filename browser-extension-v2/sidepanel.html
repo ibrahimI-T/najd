@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NAJD AGENT</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <img class="logo" src="icons/icon-48.png" alt="" width="28" height="28">
+    <div class="brand"><strong>NAJD AGENT</strong><small data-i18n="tagline"></small></div>
+    <span id="status" class="status" role="status" aria-live="polite"><i class="dot" aria-hidden="true"></i><span id="status-text"></span></span>
+    <button id="lang" class="icon" type="button"><span id="lang-label"></span></button>
+    <button id="history" class="icon" type="button" hidden aria-expanded="false" data-i18n-title="historyLabel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg>
+    </button>
+    <button id="new-ask" class="icon" type="button" hidden data-i18n-title="newChat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </header>
+
+  <main id="view-unlinked" class="pad" hidden>
+    <h1 data-i18n="connectTitle"></h1>
+    <p data-i18n="connectBody"></p>
+    <p id="unlinked-note" class="note" role="status" hidden></p>
+    <button id="connect" class="primary" type="button" data-i18n="connectButton"></button>
+    <details class="more">
+      <summary data-i18n="manualTitle"></summary>
+      <p class="note" data-i18n="manualHint"></p>
+      <form id="code-form">
+        <input id="code" type="text" autocomplete="off" spellcheck="false" dir="ltr" data-i18n-placeholder="manualPlaceholder" aria-label="" required>
+        <button class="secondary" type="submit" data-i18n="manualButton"></button>
+      </form>
+      <p id="code-error" class="error" role="alert" hidden></p>
+    </details>
+  </main>
+
+  <main id="view-pairing" class="pad" hidden>
+    <h1 data-i18n="pairingTitle"></h1>
+    <p class="code" id="pair-code" dir="ltr" aria-live="polite"></p>
+    <p data-i18n="pairingBody"></p>
+  </main>
+
+  <main id="view-linked" class="chat" hidden>
+    <section id="history-menu" class="tab-menu history-menu" hidden></section>
+    <section id="site-access" class="banner" hidden>
+      <strong data-i18n="siteTitle"></strong>
+      <p data-i18n="siteBody"></p>
+      <button id="allow-sites" class="primary" type="button" data-i18n="siteButton"></button>
+    </section>
+    <section id="offline" class="fallback" role="status" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16M9.5 5.2A9 9 0 0 1 21 12M3 12a9 9 0 0 0 13.6 7.7M7 12a5 5 0 0 0 7 4.6"/></svg>
+      <strong data-i18n="offlineTitle"></strong>
+      <p data-i18n="offlineBody"></p>
+      <button id="retry-offline" class="secondary" type="button" data-i18n="offlineRetry"></button>
+    </section>
+    <section id="notice" class="banner" role="status" hidden><strong id="notice-title"></strong><p id="notice-body"></p></section>
+    <section id="session-banner" class="session" role="status" hidden>
+      <i class="pulse" aria-hidden="true"></i><span data-i18n="bannerText"></span>
+      <button id="session-stop" class="secondary small" type="button" data-i18n="bannerCancel"></button>
+    </section>
+
+    <div id="thread" class="thread" aria-live="polite">
+      <div id="empty" class="empty">
+        <img src="icons/icon-128.png" alt="" width="56" height="56">
+        <strong data-i18n="emptyTitle"></strong>
+        <p data-i18n="emptyBody"></p>
+      </div>
+    </div>
+    <button id="highlight-selection" class="float" type="button" hidden data-i18n="highlight"></button>
+    <p id="toast" class="toast" role="status" hidden></p>
+
+    <div class="dock">
+      <div class="chips" role="group">
+        <button class="chip-btn" type="button" data-quick="summarize" data-i18n="quickSummarize"></button>
+        <button class="chip-btn" type="button" data-quick="translate" data-i18n="quickTranslate"></button>
+        <button class="chip-btn" type="button" data-quick="explain" data-i18n="quickExplain"></button>
+      </div>
+      <label id="page-context" class="context">
+        <input id="include-page" type="checkbox" checked>
+        <span class="ctx-text"><span data-i18n="includePage"></span><small id="page-title" dir="auto"></small></span>
+      </label>
+      <p id="page-note" class="hint" hidden data-i18n="pageUnavailable"></p>
+      <p id="selection-note" class="hint" hidden data-i18n="selectionTooLong"></p>
+      <p id="queue-note" class="hint" role="status" hidden><span data-i18n="queueNote"></span> <button id="queue-cancel" class="link" type="button" data-i18n="queueCancel"></button></p>
+      <p id="selection-chip" class="tag" hidden data-i18n="selectionChip"></p>
+      <p id="attach-chip" class="tag" hidden><span id="attach-name" dir="auto"></span><button id="attach-remove" type="button" class="x" data-i18n-title="attachRemove">×</button></p>
+      <p id="capture-chip" class="tag" hidden><span id="capture-name" dir="auto"></span><button id="capture-remove" type="button" class="x" data-i18n-title="captureRemove">×</button></p>
+      <div id="mention-chips" class="mention-chips" hidden></div>
+      <div id="tab-menu" class="tab-menu" role="listbox" hidden data-i18n-title="mentionLabel"></div>
+      <p id="ask-error" class="error" role="alert" hidden></p>
+      <form id="ask-form" class="composer">
+        <textarea id="ask-text" rows="2" maxlength="4000" dir="auto" data-i18n-placeholder="askPlaceholder"></textarea>
+        <div class="row">
+          <button id="attach" class="icon" type="button" data-i18n-title="attachLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>
+          </button>
+          <button id="capture" class="icon" type="button" data-i18n-title="captureLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>
+          </button>
+          <button id="mention" class="icon at" type="button" data-i18n-title="mentionLabel">@</button>
+          <button id="slash" class="icon at" type="button" data-i18n-title="skillLabel">/</button>
+          <button id="voice" class="icon" type="button" aria-pressed="false" data-i18n-title="voiceLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <select id="model" data-i18n-title="modelLabel"><option value="" data-i18n="modelDefault"></option></select>
+          <span class="spacer"></span>
+          <button id="stop" class="icon stop" type="button" hidden data-i18n-title="stopLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+          </button>
+          <button id="send" class="send" type="submit" data-i18n-title="sendLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+          </button>
+        </div>
+        <input id="file" type="file" hidden accept=".txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.xml,.log,.yaml,.yml,text/*">
+      </form>
+    </div>
+  </main>
+
+  <footer>
+    <p class="privacy" data-i18n="privacy"></p>
+    <button id="selection-bar" class="link" type="button" aria-pressed="true"></button>
+    <button id="unlink" class="link" type="button" hidden data-i18n="unlinkButton"></button>
+  </footer>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

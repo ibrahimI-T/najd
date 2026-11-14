@@ -18,3 +18,14 @@ test('NAJD\'s own page may copy and go full screen; nothing else, and never from
   assert.equal(policy.check(app, 'media', page, { requestingUrl: page, isMainFrame: true }), false)
   assert.equal(policy.check(app, 'clipboard-sanitized-write', page, { isMainFrame: true }), true)
 })
+
+test('voice input: the microphone only, for NAJD\'s own page and main frame; any request with video is refused (R-080)', async () => {
+  assert.equal(await ask(app, 'media', { requestingUrl: page, isMainFrame: true, mediaTypes: ['audio'] }), true)
+  assert.equal(await ask(app, 'media', { requestingUrl: page, isMainFrame: true, mediaTypes: ['video'] }), false)
+  assert.equal(await ask(app, 'media', { requestingUrl: page, isMainFrame: true, mediaTypes: ['audio', 'video'] }), false)
+  assert.equal(await ask(app, 'media', { requestingUrl: page, isMainFrame: false, mediaTypes: ['audio'] }), false)
+  assert.equal(await ask(other, 'media', { requestingUrl: page, isMainFrame: true, mediaTypes: ['audio'] }), false)
+  assert.equal(await ask(app, 'media', { requestingUrl: 'https://example.com/', isMainFrame: true, mediaTypes: ['audio'] }), false)
+  assert.equal(policy.check(app, 'media', 'file://', { requestingUrl: page, isMainFrame: true, mediaType: 'audio' }), true)
+  assert.equal(policy.check(app, 'media', 'file://', { requestingUrl: page, isMainFrame: true, mediaType: 'video' }), false)
+})

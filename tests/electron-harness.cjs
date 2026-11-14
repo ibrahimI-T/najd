@@ -19,13 +19,43 @@ app.commandLine.appendSwitch('remote-debugging-port', String(port))
 // Test windows open behind the developer's foreground app; without this Chromium reports them occluded
 // ("hidden") and NAJD correctly pauses background polling, which would stall UI assertions.
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+// The UI crawler (tests/ui-crawl.cjs) presses every button: links, folders and files it would open on the real desktop are recorded in
+// <profile>/shell-calls.jsonl instead of being opened.
+if (process.env.NAJD_TEST_RECORD_SHELL === '1') {
+  const { shell } = require('electron')
+  const record = (kind, value) => { fs.appendFileSync(path.join(root, 'shell-calls.jsonl'), JSON.stringify({ kind, value: String(value).slice(0, 300), at: Date.now() }) + '\n'); return kind === 'openPath' ? Promise.resolve('') : Promise.resolve() }
+  shell.openExternal = url => record('openExternal', url)
+  shell.openPath = target => record('openPath', target)
+  shell.showItemInFolder = target => { void record('showItemInFolder', target) }
+}
+// MCP OAuth sign-in (R-080): the "browser" follows the fixture authorization page's redirect to NAJD's loopback page, as the owner's
+// browser does after they sign in. Only loopback fixture addresses are followed.
+if (process.env.NAJD_TEST_OAUTH_BROWSER === '1') {
+  const { shell } = require('electron')
+  const open = shell.openExternal
+  shell.openExternal = async url => {
+    if (!/^http:\/\/127\.0\.0\.1:\d+\//.test(String(url))) return open(url)
+    const step = await fetch(url, { redirect: 'manual' })
+    const next = step.headers.get('location')
+    if (next && /^http:\/\/127\.0\.0\.1:\d+\/callback\?/.test(next)) await fetch(next)
+  }
+}
+// Voice input (R-080): Chromium's fake microphone and permission UI, and a fixture transcription service for the test key only.
+if (process.env.NAJD_TEST_FAKE_MIC === '1') {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream')
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => String(url) === 'https://api.openai.com/v1/audio/transcriptions'
+    ? (init?.headers?.Authorization === 'Bearer sk-najd-API-TEST-KEY' && init.body?.get?.('file')?.size > 200 ? new Response(JSON.stringify({ text: 'NAJD voice fixture text' })) : new Response('{}', { status: 400 }))
+    : realFetch(url, init)
+}
 // The fixture picker exists only in this harness; production uses the OS dialog.
-dialog.showOpenDialog = async (_window, options) => ({ canceled: false, filePaths: options?.title === 'Add documents to NAJD'
+dialog.showOpenDialog = async (_window, options) => ({ canceled: false, filePaths: options?.filters?.[0]?.name === 'NAJD package' && fs.existsSync(path.join(root + '-imports', 'package-fixture.zip')) ? [path.join(root + '-imports', 'package-fixture.zip')] : options?.title === 'Add documents to NAJD' || (options?.title === 'Add files to the knowledge base' && fs.existsSync(path.join(root + '-imports', 'pick.txt')))
   ? fs.existsSync(path.join(root + '-imports', 'pick.txt')) ? [path.join(root + '-imports', fs.readFileSync(path.join(root + '-imports', 'pick.txt'), 'utf8').trim())]
   : fs.existsSync(path.join(root + '-imports', 'photo.png')) ? [path.join(root + '-imports', 'photo.png')]
   : fs.existsSync(path.join(root + '-imports', 'report.md')) ? [path.join(root + '-imports', 'report.md')] : [path.join(root + '-imports', 'report.docx'), path.join(root + '-imports', 'report.pdf')]
   : [path.join(root, options?.defaultPath?.startsWith('najd-learning-') ? options.defaultPath : options?.properties?.includes('openFile') ? 'memory-backup.json' : 'read-fixtures')] })
-dialog.showSaveDialog = async (_window, options) => ({ canceled: false, filePath: path.join(root, options?.defaultPath?.startsWith('najd-learning-') ? options.defaultPath : options?.defaultPath === 'najd-memory-backup.json' ? 'memory-backup.json' : 'export-fixture.txt') })
+dialog.showSaveDialog = async (_window, options) => ({ canceled: false, filePath: path.join(root, options?.defaultPath?.startsWith('najd-learning-') ? options.defaultPath : options?.defaultPath === 'najd-memory-backup.json' ? 'memory-backup.json' : 'export-fixture' + (fs.existsSync(path.join(root, 'export-ext.txt')) ? fs.readFileSync(path.join(root, 'export-ext.txt'), 'utf8').trim() : '.txt')) })
 // MCP server confirmation: answered by the smoke (file present = add) so both outcomes are tested.
 const showMessageBox = dialog.showMessageBox.bind(dialog)
 dialog.showMessageBox = async (window, options) => String(options?.message || '').startsWith('Add MCP server')
@@ -64,7 +94,8 @@ function libraryFixture(body) {
     const say = text => [{ type: 'message', content: [{ type: 'output_text', text }] }]
     let output
     if (last.type !== 'function_call_output') {
-      if (!names.includes('najd_python_run') || !names.includes('najd_files_write')) throw Error('Coding profile tools missing: ' + names.join(','))
+      // Python is offered from the first call when the request names it; writing a file loads its toolset when the model calls it.
+      if (!names.includes('najd_python_run')) throw Error('Python runner missing although the request names Python: ' + names.join(','))
       output = call('najd_files_write', { path: 'data.csv', content: 'n\n2\n3\n5\n' }, 'csv-write')
     } else if (last.call_id === 'csv-write') {
       const written = JSON.parse(last.output)
@@ -207,6 +238,12 @@ function libraryFixture(body) {
     else output = [{ type: 'message', content: [{ type: 'output_text', text: 'Done. I searched capabilities, listed and searched the workspace, then wrote showcase/report.md.' }] }]
     return new Response('data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output } }) + String.fromCharCode(10, 10))
   }
+  // Thinking display (R-083): a reasoning summary several lines long, so the activity box can show it whole on click.
+  if (prompt.includes('thinking fixture')) {
+    const lines = ['**Reading the request**', 'The owner wants the full thinking shown.', 'First line of the plan.', 'Second line of the plan.', 'THINKING-LAST-LINE-MARKER']
+    const output = [{ type: 'reasoning', summary: [{ type: 'summary_text', text: lines.join(String.fromCharCode(10)) }] }, { type: 'message', content: [{ type: 'output_text', text: 'Thinking fixture answered' }] }]
+    return new Response('data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output } }) + String.fromCharCode(10, 10))
+  }
   if (prompt.includes('workspace write fixture')) {
     const last = body.input.at(-1)
     let output
@@ -215,7 +252,8 @@ function libraryFixture(body) {
       output = [{ type: 'function_call', call_id: 'ws-write', name: 'najd_files_write', arguments: JSON.stringify({ path: 'smoke/out.txt', content: 'APPROVED-CONTENT' }) }]
     } else {
       const result = JSON.parse(last.output)
-      output = [{ type: 'message', content: [{ type: 'output_text', text: result.status === 'written' ? 'Workspace write verified' : 'Workspace write declined' }] }]
+      // A continued run carries NAJD_RESUME (what the stopped attempt had done); the reply says so for the smoke.
+      output = [{ type: 'message', content: [{ type: 'output_text', text: (result.status === 'written' ? 'Workspace write verified' : 'Workspace write declined') + (JSON.stringify(body.input).includes('NAJD_RESUME') ? ' (resumed with the earlier steps)' : '') }] }]
     }
     return new Response('data: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed', output } }) + '\n\n')
   }
@@ -242,11 +280,15 @@ authModule.createChatGPTAuth = options => {
   const json = data => new Response(JSON.stringify(data))
   const fakeFetch = async (url, options) => {
     if (url.endsWith('/revoke')) return new Response(null, { status: 200 })
-    if (url.endsWith('/models')) return json({ models: [{ slug: 'gpt-6.1-sol', display_name: 'NAJD test model', visibility: 'list' }] })
+    if (url.endsWith('/models')) return json({ models: [{ slug: 'gpt-6.1-sol', display_name: 'NAJD test model', visibility: 'list' }, { slug: 'gpt-6.1-terra', display_name: 'NAJD second test model', visibility: 'list' }] })
     if (url.endsWith('/responses')) {
       const body = JSON.parse(options.body)
       if (process.env.NAJD_TEST_OUTPUT_CAP && body.max_output_tokens !== undefined) throw new Error('An output cap was sent although usage limits were removed')
       if (JSON.stringify(body).includes('MODEL-TOOL-LOCAL-ONLY')) throw new Error('Local preview leaked into model context')
+      // Save as a skill (R-083): the offer's request reaches the model; the fixture answers with a draft (saving needs approval).
+      if (JSON.stringify((body.input || []).filter(item => item?.role === 'user' && !JSON.stringify(item.content).includes('NAJD_')).at(-1) || '').includes('najd_skill_save')) return new Response('data: ' + JSON.stringify({ type: 'response.output_text.delta', delta: 'Skill draft ready for your approval' }) + '\n\ndata: ' + JSON.stringify({ type: 'response.completed', response: { status: 'completed' } }) + '\n\n')
+      // Backup model (R-083): the subscription fails this request outright; the smoke expects NAJD to finish it on the backup.
+      if (JSON.stringify((body.input || []).filter(item => item?.role === 'user' && !JSON.stringify(item.content).includes('NAJD_')).at(-1) || '').includes('failover fixture')) return new Response(JSON.stringify({ error: { message: 'fixture outage' } }), { status: 503 })
       const libraryReply = libraryFixture(body)
       if (libraryReply) return libraryReply
       if (body.tools?.[0]?.name === 'preview_requested_file') {
@@ -277,7 +319,13 @@ authModule.createChatGPTAuth = options => {
 // Distinct API fixture; production adapters and encrypted stores remain real.
 const providerModule = require(path.join(appRoot, 'provider-client.cjs'))
 const realClient = providerModule.createProviderClient
-providerModule.createProviderClient = id => realClient(id, { fetchImpl: async (url, options) => {
+// A fixture refusal reaches NAJD only as PROVIDER_ERROR; its reason is kept in <profile>/fixture-errors.log for the failing test to read.
+const logged = handler => async (url, options) => { try { return await handler(url, options) } catch (error) { fs.appendFileSync(path.join(root, 'fixture-errors.log'), String(error?.message || error) + '\n'); throw error } }
+// Local model servers (catalog kind "local") on this computer's loopback address are real: a live local-model test talks to them
+// (tests/local-model-live-smoke.cjs). Nothing else leaves the fixture.
+const localProviders = new Set(require(path.join(appRoot, 'provider-catalog.json')).filter(entry => entry.kind === 'local').map(entry => entry.id))
+providerModule.createProviderClient = (id, settings = {}) => realClient(id, { ...settings, fetchImpl: logged(async (url, options) => {
+  if (localProviders.has(id) && /^http:\/\/127\.0\.0\.1:\d+\//.test(url)) return fetch(url, options)
   if (id !== 'openai-api' || !url.startsWith('https://api.openai.com/v1/')) throw new Error('Unexpected fixture destination')
   if (options.headers.Authorization !== 'Bearer sk-najd-API-TEST-KEY') throw new Error('Credential isolation failed')
   if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'gpt-6.1-sol' }] }))
@@ -303,7 +351,7 @@ providerModule.createProviderClient = id => realClient(id, { fetchImpl: async (u
   if (body.instructions?.startsWith('NAJD_LEARNING_REVIEW.')) throw new Error('Unexpected billable learning review')
   const reply = 'NAJD API test OK'
   return new Response(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: reply })}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n`)
-} })
+}) })
 if (process.env.NAJD_TEST_UPDATE_FIXTURE === '1') {
   const memoryModule=require(path.join(appRoot,'memory-store.cjs')), memoryFactory=memoryModule.createMemoryStore
   memoryModule.createMemoryStore=filename=>{const store=memoryFactory(filename);return{...store,save:input=>input.text==='BLOCK-UPDATE-FIXTURE'?new Promise((_,reject)=>setTimeout(()=>reject(Error('Owned fixture write failure')),1000)):store.save(input)}}
@@ -334,5 +382,16 @@ if (process.env.NAJD_TEST_DURABLE_ACTION === '1') {
     })
     return { app: application, opened: true, owned: true, focused: true, inputVerified: true, closed: true, cleaned: true, verified: true }
   } })
+}
+// MCP prerequisites (TAKEOVER-PLAN 5.3): commands listed in <profile>/missing-programs.txt are reported absent to the gallery's check,
+// so the "missing" card is tested without uninstalling anything. Read on every call, so a test can remove the file and press Recheck.
+{
+  const mcpModule = require(path.join(appRoot, 'mcp-servers.cjs'))
+  const realResolve = mcpModule.resolveCommand
+  mcpModule.resolveCommand = (command, ...rest) => {
+    const listed = path.join(root, 'missing-programs.txt')
+    if (fs.existsSync(listed) && fs.readFileSync(listed, 'utf8').split(/\s+/).includes(command)) return null
+    return realResolve(command, ...rest)
+  }
 }
 require(path.join(appRoot, 'main.cjs'))

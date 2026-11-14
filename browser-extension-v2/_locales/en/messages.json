@@ -1,0 +1,395 @@
+{
+  "extName": {
+    "message": "NAJD Browser"
+  },
+  "extDescription": {
+    "message": "Connects your browser to the NAJD AGENT desktop app: it browses for you, finishes tasks and answers in a side panel. Local only."
+  },
+  "actionTitle": {
+    "message": "NAJD AGENT"
+  },
+  "contextAskSelection": {
+    "message": "Ask NAJD about \"%s\""
+  },
+  "contextAskPage": {
+    "message": "Ask NAJD about this page"
+  },
+  "tagline": {
+    "message": "Your agent, beside every page"
+  },
+  "statusConnected": {
+    "message": "Connected to NAJD"
+  },
+  "statusOffline": {
+    "message": "NAJD is not running"
+  },
+  "statusUnlinked": {
+    "message": "Not linked"
+  },
+  "statusPairing": {
+    "message": "Waiting for your confirmation"
+  },
+  "statusSearching": {
+    "message": "Looking for NAJD…"
+  },
+  "connectTitle": {
+    "message": "Connect to NAJD"
+  },
+  "connectBody": {
+    "message": "Link this browser with the NAJD AGENT app on this computer. NAJD will ask you to confirm in its own window. The link itself never leaves this computer."
+  },
+  "connectButton": {
+    "message": "Connect"
+  },
+  "searching": {
+    "message": "Looking for NAJD on this computer…"
+  },
+  "notFound": {
+    "message": "NAJD was not found. Open the NAJD AGENT app on this computer, then try again."
+  },
+  "pairingTitle": {
+    "message": "Confirm in the NAJD window"
+  },
+  "pairingBody": {
+    "message": "A window in NAJD shows the same code. Allow only if the codes match."
+  },
+  "denied": {
+    "message": "The connection was declined in NAJD."
+  },
+  "expired": {
+    "message": "The request expired. Try again."
+  },
+  "busy": {
+    "message": "Too many requests. Wait a few minutes and try again."
+  },
+  "retry": {
+    "message": "Try again"
+  },
+  "siteTitle": {
+    "message": "Allow NAJD to work on websites"
+  },
+  "siteBody": {
+    "message": "To browse and act in its own tab, NAJD needs access to the sites it opens for you. It works only in the NAJD tab group and only when you ask it to."
+  },
+  "siteButton": {
+    "message": "Allow on all sites"
+  },
+  "askLabel": {
+    "message": "Ask NAJD"
+  },
+  "askPlaceholder": {
+    "message": "What should NAJD do?"
+  },
+  "includePage": {
+    "message": "Include this page"
+  },
+  "selectionChip": {
+    "message": "Selected text included"
+  },
+  "sendButton": {
+    "message": "Send"
+  },
+  "stopButton": {
+    "message": "Stop"
+  },
+  "newAsk": {
+    "message": "New question"
+  },
+  "working": {
+    "message": "Working…"
+  },
+  "queued": {
+    "message": "Waiting for NAJD…"
+  },
+  "waitingApproval": {
+    "message": "NAJD is waiting for your approval in the app."
+  },
+  "done": {
+    "message": "Done"
+  },
+  "failed": {
+    "message": "NAJD could not finish this."
+  },
+  "cancelled": {
+    "message": "Stopped"
+  },
+  "unconfirmed": {
+    "message": "The outcome is unconfirmed. Check before trying again."
+  },
+  "copy": {
+    "message": "Copy"
+  },
+  "copied": {
+    "message": "Copied"
+  },
+  "askFailed": {
+    "message": "The question could not be sent. Is NAJD running?"
+  },
+  "tooMany": {
+    "message": "Too many questions in a minute. Wait a moment."
+  },
+  "unlinkButton": {
+    "message": "Disconnect this browser"
+  },
+  "manualTitle": {
+    "message": "Link with a code"
+  },
+  "manualHint": {
+    "message": "Paste the code from NAJD Settings → Browser. It works once."
+  },
+  "manualPlaceholder": {
+    "message": "Link code"
+  },
+  "manualButton": {
+    "message": "Link"
+  },
+  "badCode": {
+    "message": "That code is not valid or was already used."
+  },
+  "offlineHelp": {
+    "message": "NAJD is not running. Open it and this panel reconnects by itself."
+  },
+  "toolFiles": {
+    "message": "Working with files"
+  },
+  "toolSearch": {
+    "message": "Searching"
+  },
+  "toolWeb": {
+    "message": "Reading the web"
+  },
+  "toolBrowser": {
+    "message": "Using the browser"
+  },
+  "toolCommand": {
+    "message": "Running a command"
+  },
+  "toolPython": {
+    "message": "Running a script"
+  },
+  "toolSkill": {
+    "message": "Using a skill"
+  },
+  "toolDesktop": {
+    "message": "Using the desktop"
+  },
+  "toolOther": {
+    "message": "Working…"
+  },
+  "privacy": {
+    "message": "Talks only to the NAJD app on this computer (127.0.0.1); nothing is stored in the cloud. A page is shared only with a question you send. Answers come from the AI provider chosen in NAJD; voice typing uses your browser’s speech service."
+  },
+  "defaultSelectionQuestion": {
+    "message": "Explain this selected text."
+  },
+  "pageUnavailable": {
+    "message": "NAJD cannot read this page until website access is allowed (see above), or the page is a browser page. Press Send again to ask without it, or untick “Include this page”."
+  },
+  "answerTruncated": {
+    "message": "This answer is long: only its first part is shown here and copied. The complete answer is in the NAJD conversation."
+  },
+  "selectionTooLong": {
+    "message": "The selected text is longer than NAJD takes (2,000 characters): only its beginning will be used. Press Send again to continue, or select less."
+  },
+  "emptyTitle": {
+    "message": "How can NAJD help with this page?"
+  },
+  "emptyBody": {
+    "message": "Ask about what you are reading. NAJD sees this page only when you send a question with it included."
+  },
+  "quickSummarize": {
+    "message": "Summarize this page"
+  },
+  "quickTranslate": {
+    "message": "Translate"
+  },
+  "quickExplain": {
+    "message": "Explain"
+  },
+  "promptSummarize": {
+    "message": "Summarize this page: the main points first, then anything important to know."
+  },
+  "promptTranslate": {
+    "message": "Translate the main content of this page. If it is in Arabic, translate it into English; otherwise into Arabic."
+  },
+  "promptExplain": {
+    "message": "Explain this page in simple terms."
+  },
+  "pageNone": {
+    "message": "No readable page in this tab"
+  },
+  "attachLabel": {
+    "message": "Attach a text file"
+  },
+  "attachRemove": {
+    "message": "Remove the attached file"
+  },
+  "attachTooBig": {
+    "message": "Attach a text file of up to 500 KB (txt, md, csv, json, html)."
+  },
+  "attachNotText": {
+    "message": "Only text files can be attached here."
+  },
+  "voiceLabel": {
+    "message": "Voice typing"
+  },
+  "voiceUnavailable": {
+    "message": "Voice typing is not available in this browser."
+  },
+  "voiceDenied": {
+    "message": "Allow the microphone for this extension to type by voice."
+  },
+  "voiceListening": {
+    "message": "Listening…"
+  },
+  "modelLabel": {
+    "message": "Model"
+  },
+  "modelDefault": {
+    "message": "NAJD’s model"
+  },
+  "sendLabel": {
+    "message": "Send"
+  },
+  "stopLabel": {
+    "message": "Stop"
+  },
+  "newChat": {
+    "message": "New chat"
+  },
+  "toolCalls": {
+    "message": "Tool calls"
+  },
+  "stepReasoning": {
+    "message": "Reasoning"
+  },
+  "stepReadPage": {
+    "message": "Read page"
+  },
+  "stepRead": {
+    "message": "Reading"
+  },
+  "stepBrowse": {
+    "message": "Browsing"
+  },
+  "stepWork": {
+    "message": "Working"
+  },
+  "stepApproval": {
+    "message": "Waiting for your approval"
+  },
+  "reviewInNajd": {
+    "message": "Review in NAJD"
+  },
+  "highlight": {
+    "message": "Highlight on page"
+  },
+  "highlightFound": {
+    "message": "Highlighted on the page."
+  },
+  "highlightMissing": {
+    "message": "That text is not on this page."
+  },
+  "highlightBlocked": {
+    "message": "NAJD cannot mark text on this page."
+  },
+  "bannerText": {
+    "message": "NAJD started debugging this browser"
+  },
+  "bannerCancel": {
+    "message": "Cancel"
+  },
+  "offlineTitle": {
+    "message": "NAJD is not running"
+  },
+  "offlineBody": {
+    "message": "Open the NAJD AGENT app on this computer. This panel reconnects by itself and keeps your chat."
+  },
+  "offlineRetry": {
+    "message": "Try again"
+  },
+  "you": {
+    "message": "You"
+  },
+  "najd": {
+    "message": "NAJD"
+  },
+  "appOldTitle": {
+    "message": "Update the NAJD app"
+  },
+  "appOldBody": {
+    "message": "This NAJD app is older than the extension: every question opens a new conversation, and the page text, model choice and tool calls are not used. Install the latest NAJD AGENT to chat here."
+  },
+  "queueNote": {
+    "message": "Sends when NAJD is ready"
+  },
+  "queueCancel": {
+    "message": "Cancel"
+  },
+  "selectionBarAsk": {
+    "message": "Ask NAJD"
+  },
+  "selectionBarOn": {
+    "message": "Selection button: on"
+  },
+  "selectionBarOff": {
+    "message": "Selection button: off"
+  },
+  "mentionLabel": {
+    "message": "Add another open tab (@)"
+  },
+  "mentionNone": {
+    "message": "No other open web pages in this window"
+  },
+  "mentionRemove": {
+    "message": "Remove this tab"
+  },
+  "mentionMax": {
+    "message": "Up to 3 tabs with one question"
+  },
+  "skillLabel": {
+    "message": "Use one of NAJD’s skills (/)"
+  },
+  "skillNone": {
+    "message": "No skill matches"
+  },
+  "skillUnavailable": {
+    "message": "NAJD’s skills could not be loaded"
+  },
+  "historyLabel": {
+    "message": "Earlier chats"
+  },
+  "historyTitle": {
+    "message": "Earlier chats in this browser session (all answers are also in NAJD)"
+  },
+  "historyEmpty": {
+    "message": "No earlier chats yet. \"New chat\" keeps the one it closes here."
+  },
+  "historyOne": {
+    "message": "1 question"
+  },
+  "historyMany": {
+    "message": "$1 questions"
+  },
+  "captureLabel": {
+    "message": "Send a picture of the visible page"
+  },
+  "captureRemove": {
+    "message": "Remove the picture"
+  },
+  "captureChip": {
+    "message": "Picture of the page (sent with the question)"
+  },
+  "captureSent": {
+    "message": "Picture of the page"
+  },
+  "captureNoPage": {
+    "message": "There is no web page to take a picture of in this window."
+  },
+  "captureFailed": {
+    "message": "The browser did not give a picture of this page. Try again after the page has loaded."
+  },
+  "captureTooBig": {
+    "message": "The picture of this page is too large to send."
+  }
+}

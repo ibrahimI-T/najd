@@ -631,3 +631,151 @@ test('R064-IR-4702: a selection that does not fit is cut and says so in the text
   await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'again', page: { url: 'https://x.example/', title: 't', selection: 'short' } } })
   assert.equal(received[1].page.selection, 'short')
 })
+
+test('side panel picture: one JPEG or PNG of the page reaches NAJD as bytes beside the question, is never kept with it, and anything else is refused', async t => {
+  const { bridge, port } = await started(t)
+  const secret = await pair(bridge, port, ext('a'))
+  const received = []
+  bridge.setHandlers({ onAsk: ask => { received.push(ask) } })
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)]), png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(50, 1)])
+  const asked = await (await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'what is on screen?', page: { url: 'https://example.com/', title: 't', picture: jpeg.toString('base64') } } })).json()
+  assert.equal(asked.ok, true)
+  assert.equal(received.at(-1).picture.name, 'page.jpg'); assert.ok(received.at(-1).picture.bytes.equals(jpeg))
+  assert.equal(received.at(-1).page.picture, undefined, 'the picture is not part of the page details')
+  assert.equal(JSON.stringify(bridge.getAsk(asked.id)).includes(jpeg.toString('base64')), false, 'the question kept in the bridge holds no picture')
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'png', page: { url: '', title: '', picture: png.toString('base64') } } })
+  assert.equal(received.at(-1).picture.name, 'page.png')
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'no picture', page: { url: 'https://example.com/', title: 't' } } })
+  assert.equal(received.at(-1).picture, undefined)
+  const count = received.length
+  for (const picture of [Buffer.from('GIF89a....').toString('base64'), 'not base64!', '', 42, Buffer.concat([jpeg, Buffer.alloc(3 * 1024 * 1024)]).toString('base64')]) {
+    const response = await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'bad', page: { url: '', title: '', picture } } })
+    assert.equal(response.status, 400, 'refused: ' + String(picture).slice(0, 20))
+  }
+  assert.equal(received.length, count, 'a refused picture never reaches NAJD')
+})
+
+test('side panel chat: the page text, its language and an attached file travel bounded beside the question; follow-ups and models are checked', async t => {
+  const mask = value => typeof value === 'string' ? value.split('SAVED-PASSWORD').join('[hidden]') : value && typeof value === 'object' ? JSON.parse(JSON.stringify(value).split('SAVED-PASSWORD').join('[hidden]')) : value
+  const { bridge, port } = await started(t, { sanitize: mask })
+  const secret = await pair(bridge, port, ext('a')), other = await pair(bridge, port, ext('b'))
+  const received = []
+  bridge.setHandlers({ onAsk: ask => { received.push(ask) }, onModels: async () => [{ provider: 'ollama', providerName: 'Ollama', model: 'qwen3:8b', name: 'Qwen 3' }, { provider: 'bad provider!', model: 'x' }] })
+  const longText = 'السعر 49 ريال. '.repeat(2000) + 'SAVED-PASSWORD'
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'ما السعر؟', page: { url: 'https://example.com/plan', title: 'خطة', text: longText, lang: 'ar', attachment: { name: '../notes.txt', text: 'line one\u0000\nSAVED-PASSWORD' } } } })
+  const first = received.at(-1)
+  assert.equal(first.page.lang, 'ar')
+  assert.ok(first.page.text.length <= 12000 && /\[…cut: only the first 11900 characters of the page text were supplied\]$/.test(first.page.text), 'a long page is cut and says so')
+  assert.deepEqual(first.page.attachment, { name: '.. notes.txt', text: 'line one \n[hidden]' }, 'the attachment is cleaned and masked')
+  assert.equal(first.after, null); assert.equal(first.model, null)
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'x', page: { url: 'https://example.com', title: 't', lang: 'not a language tag' } } })
+  assert.equal(received.at(-1).page.lang, '')
+  // Tabs named with @: at most three web pages, each cut to 6000 characters (saying so) and masked; other addresses are dropped.
+  const tabText = 'tab words '.repeat(1000) + 'SAVED-PASSWORD'
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'compare', page: { url: '', title: '', tabs: [
+    { url: 'https://a.example/x#part', title: 'A\u0000tab', text: tabText }, { url: 'https://c.example/', title: 'C', text: 'SAVED-PASSWORD here' }, { url: 'https://user:pw@b.example/', title: 'creds', text: 'no' },
+    { url: 'file:///C:/secret.txt', title: 'file', text: 'no' }, { url: 'https://d.example/', title: 'D', text: 'fourth' }, { url: 'https://e.example/', title: 'E', text: 'fifth' }] } } })
+  const tabs = received.at(-1).page.tabs
+  assert.deepEqual(tabs.map(tab => tab.url), ['https://a.example/x', 'https://c.example/'], 'only web pages from the first three entries, without a fragment')
+  assert.equal(tabs[0].title, 'A tab'); assert.ok(tabs[0].text.length <= 6000 && /only the first 5900 characters of the tab text were supplied\]$/.test(tabs[0].text))
+  assert.equal(tabs[1].text, '[hidden] here', 'masked')
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'none', page: { url: 'https://example.com', title: 't', tabs: 'not a list' } } })
+  assert.equal(received.at(-1).page.tabs, undefined)
+  // A follow-up continues only a question of the same browser that reached a task.
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'before the task', after: first.id } })
+  assert.equal(received.at(-1).after, null, 'no task yet: a new conversation')
+  bridge.updateAsk(first.id, { state: 'done', taskId: '11111111-1111-4111-8111-111111111111', output: 'answer' })
+  await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'and then?', after: first.id } })
+  assert.deepEqual(received.at(-1).after, { taskId: '11111111-1111-4111-8111-111111111111' })
+  await call(port, '/v2/ask', { origin: ext('b'), secret: other, method: 'POST', body: { text: 'not yours', after: first.id } })
+  assert.equal(received.at(-1).after, null, 'another browser cannot continue it')
+  // Models: only what NAJD listed (well-formed) can be chosen.
+  const listed = await (await call(port, '/v2/models', { secret })).json()
+  assert.deepEqual(listed.models, [{ provider: 'ollama', providerName: 'Ollama', model: 'qwen3:8b', name: 'Qwen 3' }])
+  assert.equal((await call(port, '/v2/models')).status, 401, 'no secret, no list')
+  // Skills for "/": ids checked, names and descriptions cleaned and cut; no secret, no list.
+  bridge.setHandlers({ onSkills: async () => [{ id: 'pdf-tools', name: 'PDF\u0000tools', description: 'd'.repeat(300) }, { id: 'Bad Id', name: 'x' }, { id: 'najd-docx', name: '' }, null] })
+  const skillList = await (await call(port, '/v2/skills', { secret })).json()
+  assert.deepEqual(skillList.skills, [{ id: 'pdf-tools', name: 'PDF tools', description: 'd'.repeat(160) }, { id: 'najd-docx', name: 'najd-docx', description: '' }])
+  assert.equal((await call(port, '/v2/skills')).status, 401)
+  bridge.setHandlers({ onSkills: async () => { throw new Error('down') } })
+  assert.deepEqual((await (await call(port, '/v2/skills', { secret })).json()).skills, [], 'a failing list is empty, not an error')
+  assert.equal((await (await call(port, '/v2/hello', { secret })).json()).chat, true, 'the panel learns that this app continues follow-ups (older apps do not)')
+  await call(port, '/v2/ask', { origin: ext('b'), secret: other, method: 'POST', body: { text: 'chosen', model: { provider: 'ollama', model: 'qwen3:8b' } } })
+  assert.deepEqual(received.at(-1).model, { provider: 'ollama', model: 'qwen3:8b' })
+  await call(port, '/v2/ask', { origin: ext('b'), secret: other, method: 'POST', body: { text: 'not offered', model: { provider: 'openai', model: 'gpt-x' } } })
+  assert.equal(received.at(-1).model, null, 'a model NAJD did not offer is ignored')
+})
+
+test('side panel chat: tool-call steps come from the task activity, only bounded fields reach the panel, and "Review in NAJD" only brings the app forward', async t => {
+  const { stepsFromEvents } = require('../electron/browser-bridge.cjs')
+  const steps = stepsFromEvents([{ type: 'task.started' }, { type: 'reasoning.summary', detail: 'Planning\nthe read' }, { type: 'reasoning.text', detail: 'private thinking' },
+    { type: 'tool.started', tool: 'najd-browser', detail: 'read' }, { type: 'tool.completed', tool: 'najd-browser' }, { type: 'tool.started', tool: 'najd-files-read', detail: 'notes.txt' },
+    { type: 'tool.failed', tool: 'najd-files-read' }, { type: 'approval.requested' }, { type: 'approval.resolved', decision: 'ALLOW_ONCE' }, { type: 'tool.started', tool: 'najd-python' }])
+  assert.deepEqual(steps, [{ kind: 'reasoning', state: 'done', detail: 'Planning the read' }, { kind: 'browse', state: 'done', tool: 'najd-browser', detail: 'read' },
+    { kind: 'read', state: 'failed', tool: 'najd-files-read', detail: 'notes.txt' }, { kind: 'approval', state: 'done' }, { kind: 'work', state: 'running', tool: 'najd-python' }])
+  assert.ok(!JSON.stringify(steps).includes('private thinking'), 'the thinking text of the model never reaches the panel')
+  assert.deepEqual(stepsFromEvents([{ type: 'task.started' }, { type: 'tool.started', tool: 'najd-web' }, { type: 'task.cancelled' }]).map(step => step.state), ['done', 'failed'], 'a stopped task leaves no step running')
+  assert.equal(stepsFromEvents(Array.from({ length: 100 }, () => ({ type: 'tool.started', tool: 'najd-web' }))).length, 40)
+
+  const { bridge, port } = await started(t)
+  const secret = await pair(bridge, port)
+  const shown = []
+  bridge.setHandlers({ onAsk: () => {}, onAskShow: info => { shown.push(info) } })
+  const made = await (await call(port, '/v2/ask', { secret, method: 'POST', body: { text: 'q' } })).json()
+  bridge.updateAsk(made.id, { state: 'running', taskId: '22222222-2222-4222-8222-222222222222', steps: [...steps, { kind: 'evil', state: 'done' }, { kind: 'work', state: 'done', tool: 'NOT A TOOL', detail: 'x'.repeat(500) }] })
+  const view = await (await call(port, `/v2/ask/${made.id}`, { secret })).json()
+  assert.equal(view.steps.length, 6, 'unknown kinds are dropped')
+  assert.deepEqual(view.steps.at(-1), { kind: 'work', state: 'done', detail: 'x'.repeat(160) }, 'tool names are checked and details bounded')
+  bridge.updateAsk(made.id, { state: 'done', output: 'answer', steps: [{ kind: 'reasoning', state: 'done' }] })
+  bridge.updateAsk(made.id, { steps: [{ kind: 'work', state: 'running' }] })
+  assert.deepEqual((await (await call(port, `/v2/ask/${made.id}`, { secret })).json()).steps, [{ kind: 'reasoning', state: 'done' }], 'a finished answer keeps its final steps')
+  assert.equal((await call(port, `/v2/ask/${made.id}/show`, { secret, method: 'POST' })).status, 200)
+  assert.deepEqual(shown, [{ id: made.id, taskId: '22222222-2222-4222-8222-222222222222' }])
+  assert.equal((await call(port, `/v2/ask/${made.id}/show`, { origin: ext('b'), method: 'POST' })).status, 401)
+})
+
+test('the browser banner: a task using the browser is a session; Cancel from that browser stops only that task and drops its queued commands', async t => {
+  const { bridge, port } = await started(t, { pollMs: 2000 })
+  const secret = await pair(bridge, port), other = await pair(bridge, port, ext('b'))
+  const stops = []
+  bridge.setHandlers({ onSessionStop: info => { stops.push(info) } })
+  const poll = async () => { const response = await call(port, '/v2/command/next', { secret }); return response.status === 200 ? response.json() : null }
+  const respond = (id, body) => call(port, '/v2/command/result', { secret, method: 'POST', body: { id, ...body } })
+  const page = { url: 'https://example.com/', title: 'Example', text: '', elements: [] }
+  assert.deepEqual(await (await call(port, '/v2/session', { secret })).json(), { ok: true, active: false, since: null })
+  const owner = '33333333-3333-4333-8333-333333333333'
+  const opened = bridge.command('open', { url: 'https://example.com' }, { owner })
+  const sent = await poll()
+  assert.equal(sent.session, true, 'the extension is told that a task is working (it shows the banner)')
+  await respond(sent.id, { ok: true, resultIsPage: true, page })
+  await opened
+  assert.equal(bridge.sessionOwner(), owner)
+  assert.equal((await (await call(port, '/v2/session', { secret })).json()).active, true)
+  assert.equal((await (await call(port, '/v2/session', { origin: ext('b'), secret: other })).json()).active, false, 'only the browser NAJD works in shows the banner')
+  assert.deepEqual(await (await call(port, '/v2/session/stop', { origin: ext('b'), secret: other, method: 'POST' })).json(), { ok: true, stopped: false }, 'another browser cannot stop it')
+  const queued = assert.rejects(bridge.command('read', {}, { owner }), { code: 'CANCELLED' })
+  assert.deepEqual(await (await call(port, '/v2/session/stop', { secret, method: 'POST' })).json(), { ok: true, stopped: true })
+  assert.deepEqual(stops, [{ taskId: owner }])
+  await queued
+  assert.equal(bridge.sessionOwner(), null)
+  const plainCommand = bridge.command('read', {})
+  const plain = await poll()
+  assert.equal(plain.kind, 'read'); assert.equal(plain.session, undefined, 'a command without a task carries no banner')
+  await respond(plain.id, { ok: true, resultIsPage: true, page })
+  await plainCommand
+  assert.equal(bridge.sessionOwner(), null)
+  bridge.command('read', {}, { owner: 'not-a-task-id' }).catch(() => {})
+  assert.equal(bridge.sessionOwner(), null, 'an owner must be a task id')
+  bridge.command('read', {}, { owner }).catch(() => {})
+  bridge.endSession(owner)
+  assert.equal(bridge.sessionOwner(), null, 'the app ends the session when the task finishes')
+})
+
+test('a linked extension older than the copy NAJD ships for its major version is marked, so the owner is told to reload it', () => {
+  const { markOutdated } = require('../electron/browser-bridge.cjs')
+  const shipped = { 1: '1.2.0', 2: '2.1.0' }
+  const marked = markOutdated([{ id: 'a', version: '2.0.30' }, { id: 'b', version: '2.1.0' }, { id: 'c', version: '1.1.9' }, { id: 'd', version: '2.2.0' }, { id: 'e', version: null }, { id: 'f', version: '3.0.0' }], shipped)
+  assert.deepEqual(marked.map(link => [link.id, link.outdated, link.latest]), [['a', true, '2.1.0'], ['b', false, '2.1.0'], ['c', true, '1.2.0'], ['d', false, '2.1.0'], ['e', false, null], ['f', false, null]])
+  assert.deepEqual(markOutdated(undefined, shipped), [])
+})

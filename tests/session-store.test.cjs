@@ -136,3 +136,19 @@ test('search caps results at 30 sessions', async t => {
   }
   assert.equal((await store.searchSessions('keyword')).length, 30)
 })
+
+test('a conversation can be renamed with a clean title; bad titles are refused and the order stays', async () => {
+  const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path')
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'najd-rename-'))
+  try {
+    const store = require('../electron/session-store.cjs').createSessionStore(path.join(dir, 'sessions.json'))
+    const first = await store.createSession(); await store.appendMessage(first.id, 'user', 'first message')
+    const second = await store.createSession(); await store.appendMessage(second.id, 'user', 'second message')
+    const before = (await store.listSessions()).map(item => item.id)
+    assert.deepEqual(await store.renameSession(first.id, '  تقرير   الربع  '), { id: first.id, title: 'تقرير الربع' })
+    assert.deepEqual((await store.listSessions()).map(item => item.id), before)
+    await assert.rejects(store.renameSession(first.id, ''), { code: 'INVALID_INPUT' })
+    await assert.rejects(store.renameSession(first.id, 'x'.repeat(61)), { code: 'INVALID_INPUT' })
+    await assert.rejects(store.renameSession('00000000-0000-4000-8000-000000000000', 'ok'), { code: 'NOT_FOUND' })
+  } finally { await fs.rm(dir, { recursive: true, force: true }) }
+})

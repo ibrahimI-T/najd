@@ -14,11 +14,11 @@
   <a href="https://github.com/ibrahimI-T/najd/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/ibrahimI-T/najd?label=version&style=for-the-badge&color=2f8cff&labelColor=1b1b1b"></a>
   <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-3fb950?style=for-the-badge&labelColor=1b1b1b"></a>
   <a href="https://discord.gg/QAbYVEdcE"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=1b1b1b"></a>
-  <a href="https://najdagent.si"><img alt="Website" src="https://img.shields.io/badge/website-najdagent.si-d7ac62?style=for-the-badge&labelColor=1b1b1b"></a>
+  <a href="https://najdagent.si"><img alt="Website" src="https://img.shields.io/badge/website-najdagent.si-2f8cff?style=for-the-badge&labelColor=1b1b1b"></a>
   <br>
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20·%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white&labelColor=1b1b1b">
   <img alt="Electron" src="https://img.shields.io/badge/Electron-44-47848F?style=for-the-badge&logo=electron&logoColor=white&labelColor=1b1b1b">
-  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=61DAFB&labelColor=1b1b1b">
+  <img alt="Vue" src="https://img.shields.io/badge/Vue-3-42B883?style=for-the-badge&logo=vuedotjs&logoColor=42B883&labelColor=1b1b1b">
   <img alt="Arabic and English" src="https://img.shields.io/badge/عربي-English-8f8f8f?style=for-the-badge&labelColor=1b1b1b">
 </p>
 
@@ -37,12 +37,28 @@ It speaks Arabic and English, uses the model you choose, and finishes real tasks
 - **Your model, your choice.** Use your ChatGPT plan, an API key (OpenAI, Claude, Gemini and others) or a local Ollama model, with adjustable thinking depth.
 - **Works on your computer.** Opens any installed app, reads and operates windows, runs commands and Python, and creates and edits files in the folders you allow.
 - **Browses for you.** The NAJD extension for Chrome and Edge lets it search, open and read pages in its own tab. Typing and clicking ask for your approval.
+- **A panel beside every page.** Summarize the page you're on, select text and press **Ask NAJD**, bring in other open tabs with `@`, call your skills with `/`, or send a picture of the page. `Alt+Shift+N` opens it, and the extension updates itself whenever NAJD does.
+- **Turns repeated work into skills.** After a task, press **Save as a skill** and NAJD keeps how it did it. You can edit the steps later and roll back if you don't like the change.
 - **Makes documents and designs.** Word, Excel and PowerPoint files and charts with the built-in Office and design pack.
 - **Signs in for you, safely.** Authorize accounts once; passwords stay in Windows protected storage and never reach the model.
 - **Connects your services.** MCP servers such as Canva, fal, Replicate and ElevenLabs, with sign-in or API-key templates.
-- **Remembers and knows.** Memory across chats, and knowledge bases (company policies, manuals) that it searches and cites.
+- **Remembers and knows.** Memory across chats, and knowledge bases (company policies, manuals) that it searches and cites. You can see which note shaped an answer and correct it in one click.
 - **From your phone.** Pair a Telegram bot and send NAJD tasks while you are away.
-- **You stay in control.** Ask every step, approve safe steps, or full access; an activity timeline shows every step. Passwords, payments and verification codes always stay with you.
+- **You stay in control.** Ask every step, approve safe steps, or full access; an activity timeline shows every step. Stop a task any time and continue it from where it stopped. Passwords, payments and verification codes always stay with you.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/task-en.png" alt="A finished task with its steps and the file it made" width="49%">
+  <img src="docs/screenshots/approvals-en.png" alt="NAJD asks before it writes a file" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/browser-en.png" alt="The NAJD panel beside a web page" width="98%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/memory-en.png" alt="What NAJD learned about you" width="49%">
+  <img src="docs/screenshots/skills-en.png" alt="Skills" width="49%">
+</p>
 
 ## Install
 

@@ -15,6 +15,8 @@ const { Worker } = require('node:worker_threads')
 
 const fail = code => Object.assign(new Error(code), { code })
 const MARKER = '.najd-component.json'
+// Components a repair may unpack again (the ones the owner can see failing); the engine and the desktop host have their own recovery.
+const REPAIRABLE = new Set(['gateway'])
 const STORE_MARKER = '.najd-runtime-store.json'
 const GENERATIONS = '.najd-generations.json'
 const FOLDER = /^[a-z][a-z-]{1,30}-[a-f0-9]{12}$/
@@ -201,6 +203,17 @@ function createBundleRuntime({ source, target }) {
     },
     generations() { try { return readGenerations() } catch { return { current: null, lastGood: null, previous: null, error: 'GENERATIONS_UNREADABLE' } } },
     collect,
+    // Repairs one unpacked component whose files were damaged after the first unpacking (found 2026-11-14: 17 files in folders named "cache" were
+    // missing from the gateway copy, so it crashed at every start). The component's marker is removed so it counts as not unpacked, and it is unpacked
+    // again from the packed archive; the old folder is set aside first and removed only once the new one is in place (see `unpack`).
+    async repair(id) {
+      const row = bundle.components.find(item => item.id === id)
+      if (!row || !REPAIRABLE.has(id)) throw fail('INVALID_INPUT')
+      if (running) await running.catch(() => {})
+      await fsp.rm(path.join(target, folderName(row), MARKER), { force: true })
+      status = { ...status, state: 'idle', error: null, done: total - row.files }
+      return prepare()
+    },
     isReady: () => status.state === 'ready',
     whenSettled: () => status.state === 'ready' || status.state === 'failed' ? Promise.resolve() : new Promise(resolve => waiters.push(resolve)),
     // Deterministic paths, known before preparation finishes.

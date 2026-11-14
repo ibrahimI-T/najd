@@ -11,7 +11,8 @@ const { validWindow } = require('./model-window.cjs')
 const num = value => Number.isFinite(value) && value >= 0 ? Math.round(value) : null
 
 // Effective execution windows NAJD knows for certain: Ollama runs with num_ctx 16384 in NAJD (ollama.cjs).
-const KNOWN_WINDOWS = { ollama: 16384 }
+// The window of every model, local ones included, comes from the provider service (Ollama is read from Ollama itself since 2026-11-09).
+const KNOWN_WINDOWS = {}
 function clean({ runId, conversationId, state, receipt, at, provider, modelName, contextWindow }) {
   const usage = receipt?.usage || {}
   const request = receipt?.request || null
@@ -23,8 +24,12 @@ function clean({ runId, conversationId, state, receipt, at, provider, modelName,
     outcome: String(receipt?.outcome || '').slice(0, 20), profile: String(receipt?.profile || '').slice(0, 30),
     toolsets: Array.isArray(receipt?.toolsets) ? receipt.toolsets.filter(name => typeof name === 'string').slice(0, 24) : [],
     toolCalls: num(receipt?.toolCalls) ?? 0,
+    ...(num(receipt?.repeatedCalls) ? { repeatedCalls: num(receipt.repeatedCalls) } : {}),
     usage: { input: num(usage.input), output: num(usage.output), total: num(usage.total), cached: num(usage.cached),
       modelCalls: num(usage.modelCalls) ?? 0, partial: usage.partial === true || (Array.isArray(usage.partialFields) && usage.partialFields.length > 0) },
+    // Tool names and skill ids the run used (owner request 2026-11-08); names are NAJD's own tool names, bounded.
+    tools: Object.fromEntries(Object.entries(receipt?.tools && typeof receipt.tools === 'object' ? receipt.tools : {}).filter(([name, times]) => /^[\w.-]{1,64}$/.test(name) && num(times)).slice(0, 60).map(([name, times]) => [name, num(times)])),
+    skills: Array.isArray(receipt?.skills) ? [...new Set(receipt.skills.filter(id => typeof id === 'string' && /^[\w.:@/-]{1,80}$/.test(id)))].slice(0, 30) : [],
     request: request ? { instructionsBytes: num(request.instructionsBytes), toolsBytes: num(request.toolsBytes), turnBytes: num(request.turnBytes),
       historyBytes: num(request.historyBytes), opaqueBytes: num(request.opaqueBytes), images: num(request.images) ?? 0 } : null
   }
@@ -41,6 +46,12 @@ function addRun(total, run) {
   }
   next.partial = next.partial || run.usage.partial
   next.modelCalls += run.usage.modelCalls; next.toolCalls += run.toolCalls
+  // Per-tool counts and skill ids across the conversation (runs recorded before 0.10.33 have none).
+  // Counted in a null-prototype map, so a name such as "constructor" is a name, not an inherited property (review 2026-11-08).
+  const tools = Object.assign(Object.create(null), next.tools || {})
+  for (const [name, times] of Object.entries(run.tools || {})) tools[name] = (Object.hasOwn(tools, name) ? tools[name] : 0) + times
+  next.tools = { ...tools }
+  next.skills = [...new Set([...(next.skills || []), ...(run.skills || [])])].slice(0, 60)
   return next
 }
 function rebuild(runs) { const result = {}; for (const run of runs) result[run.conversationId] = addRun(result[run.conversationId], run); return result }

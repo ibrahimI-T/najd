@@ -2,7 +2,7 @@
 // inside the NAJD workspace folder (symbolic links resolved), so a link can never launch a program or reach another folder.
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const OPENABLE = /\.(html?|pdf|png|jpe?g|gif|webp|svg|mp4|webm|txt|md|csv)$/i
+const OPENABLE = /\.(html?|pdf|png|jpe?g|gif|webp|svg|mp4|webm|txt|md|csv|json|docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i
 
 // The real path of a file inside the workspace, or null.
 async function insideWorkspace(target, workspaceRoot) {
@@ -24,6 +24,7 @@ function createChatLinkOpener({ shell, workspaceRoot }) {
   }
 }
 
+// Documents (Office, OpenDocument, RTF) open too since 2026-11-10 (file cards); programs and scripts never do.
 // A file path written in a reply: "open" under the same rules as a file link; "reveal" shows any workspace file in Explorer without opening it.
 async function openWorkspaceFile({ shell, workspaceRoot }, target, mode) {
   if (typeof target !== 'string' || !path.isAbsolute(target)) return false
@@ -34,4 +35,4 @@ async function openWorkspaceFile({ shell, workspaceRoot }, target, mode) {
   await shell.openPath(real)
   return true
 }
-module.exports = { createChatLinkOpener, openWorkspaceFile }
+module.exports = { createChatLinkOpener, openWorkspaceFile, insideWorkspace }

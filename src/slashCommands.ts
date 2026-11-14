@@ -2,7 +2,7 @@
 // mode, pin a profile, choose the reasoning effort, insert a skill). This module is only the list and the filtering; the menu itself is SlashMenu.tsx.
 // A command never sends anything: choosing one runs a local action or puts plain text in the message box that the owner can read and edit before sending.
 
-export type SlashGroup = 'chat' | 'settings' | 'access' | 'profile' | 'effort' | 'skill' | 'plugin'
+export type SlashGroup = 'prompt' | 'chat' | 'settings' | 'access' | 'profile' | 'effort' | 'skill' | 'plugin'
 export type SlashAction = { kind: 'insert'; text: string } | { kind: 'run'; run: () => void }
 export interface SlashItem {
   id: string
@@ -15,8 +15,9 @@ export interface SlashItem {
   action: SlashAction
 }
 
-export const GROUP_ORDER: SlashGroup[] = ['chat', 'settings', 'access', 'profile', 'effort', 'skill', 'plugin']
+export const GROUP_ORDER: SlashGroup[] = ['prompt', 'chat', 'settings', 'access', 'profile', 'effort', 'skill', 'plugin']
 export const GROUP_LABEL: Record<SlashGroup, { ar: string; en: string }> = {
+  prompt: { ar: 'أوامري المحفوظة', en: 'My saved prompts' },
   chat: { ar: 'المحادثة', en: 'Chat' },
   settings: { ar: 'فتح صفحة', en: 'Open a page' },
   access: { ar: 'الصلاحيات', en: 'Access' },
@@ -53,6 +54,7 @@ export interface SlashContext {
   busy: boolean
   skills: { id: string; name: string; description: string }[]
   pluginCommands?: { command: string; pluginName: string; description: string; body: string }[]   // commands of installed plugins: they put their text in the message box
+  prompts?: string[]                      // the owner's saved prompts (Settings > Common prompts): they put their text in the message box
   efforts: string[]                       // the reasoning efforts the selected model offers
   actions: {
     newChat(): void
@@ -92,6 +94,9 @@ export function buildSlashItems(context: SlashContext): SlashItem[] {
   const ar = context.language === 'ar'
   const pick = (item: { ar: string; en: string }) => (ar ? item.ar : item.en)
   const items: SlashItem[] = []
+  // Saved prompts come first: "/" then any word of the prompt finds it, and choosing it only fills the message box.
+  ;(context.prompts || []).forEach((text, index) => { const clean = text.replace(/\s+/g, ' ').trim(); if (clean) items.push({ id: 'prompt-' + index, group: 'prompt', command: String(index + 1), label: clean.length > 70 ? clean.slice(0, 70) + '…' : clean,
+    hint: ar ? 'يضع الأمر في الرسالة لتعدّله وترسله' : 'Puts the prompt in the message to edit and send', keywords: clean, action: { kind: 'insert', text } }) })
   items.push({ id: 'new', group: 'chat', command: 'new', label: ar ? 'محادثة جديدة' : 'New chat', hint: ar ? 'ابدأ محادثة فارغة' : 'Start an empty conversation', keywords: 'new chat clear محادثة جديدة',
     disabled: context.busy ? (ar ? 'انتظر انتهاء المهمة الحالية' : 'Wait for the current task to finish') : undefined, action: { kind: 'run', run: context.actions.newChat } })
   items.push({ id: 'read', group: 'chat', command: 'read', label: ar ? 'قراءة ملف' : 'Read a file', hint: ar ? 'يضع /read في الرسالة؛ اكتب بعده مسار الملف' : 'Puts /read in the message; type the file path after it', keywords: 'file path open ملف مسار',

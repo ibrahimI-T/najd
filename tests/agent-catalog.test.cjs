@@ -7,7 +7,8 @@ test('catalog reflects enabled skills but never invents a runnable agent adapter
   enabled=true
   const skill=await catalog.details('najd-read-document')
   assert.equal(skill.enabled,true);assert.equal(skill.ready,false);assert.equal(skill.reason,'AGENT_ADAPTER_PENDING')
-  assert.equal((await catalog.search('read')).length,1)
+  assert.equal((await catalog.search('read')).filter(row=>row.kind!=='toolset').length,1)
+  assert.ok((await catalog.search('read')).some(row=>row.kind==='toolset'&&row.toolset==='files-read'),'the toolset to load is found too')
   assert.equal((await catalog.details('native')).ready,false)
   await assert.rejects(catalog.details('../../secret'),{code:'INVALID_INPUT'})
 })
@@ -36,7 +37,7 @@ test('connected MCP tools are searchable by topic, and details carry the exact s
   const details=await catalog.details('mcp-github-list_issues')
   assert.equal(details.server,'github');assert.equal(details.tool,'list_issues');assert.deepEqual(details.inputSchema,schema);assert.equal(details.effect,'external-with-approval')
   assert.match(await catalog.summary(),/2 external MCP tools \(mcp-github-list_issues, mcp-github-list-issues\)/)
-  assert.equal((await catalog.search('mcp')).length,2)
+  assert.equal((await catalog.search('mcp')).filter(row=>row.kind==='mcp-tool').length,2)
 })
 
 test('search ranks by matching words, so a long query still finds a saved skill, which comes first', async () => {
@@ -47,4 +48,16 @@ test('search ranks by matching words, so a long query still finds a saved skill,
   assert.equal(found[0].id,'my-weekly-document-conversions')
   assert.deepEqual(await catalog.search('zzz qqq'),[])
   assert.match(await catalog.summary(),/2 enabled skill guides \(weekly document conversions, docx\)/)
+})
+test('discovery understands Arabic and everyday words and always names the toolset to load (owner request 2026-11-09)', async () => {
+  const catalog=createAgentCatalog({registry:{list:async()=>[]},connectors:{list:()=>[]}})
+  const top=async query=>(await catalog.search(query)).map(row=>row.toolset)
+  assert.ok((await top('اكتب لي ملف وورد')).includes('office'),'Word in Arabic')
+  assert.ok((await top('جدول اكسل للمصاريف')).includes('office'),'Excel in Arabic')
+  assert.ok((await top('عرض تقديمي عن الذهب')).includes('office'),'PowerPoint in Arabic')
+  assert.ok((await top('ابحث في الانترنت')).includes('web'),'web search in Arabic')
+  assert.ok((await top('مجسم ثلاثي الأبعاد')).includes('3d'),'3D in Arabic')
+  assert.ok((await top('تطبيق أندرويد')).includes('mobile'),'Android in Arabic')
+  assert.ok((await top('افتح المتصفح')).includes('browser'),'browser in Arabic')
+  for (const row of await catalog.search('toolset')) assert.equal(row.status,'loadable')
 })

@@ -1,8 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { activityKind, buildActivity, formatDuration, groupTitle, summarize } from './activity'
+import { activityKind, buildActivity, formatDuration, groupTitle, skillWorthyRun, summarize } from './activity'
 
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 21, 10, 0, seconds)).toISOString()
 const make = (events: NajdTaskActivity['events'], finishedAt: string | null = null): NajdTaskActivity => ({ version: 1, startedAt: at(0), finishedAt, events })
+
+describe('the Save as a skill offer', () => {
+  const run = (...tools: [string, string][]) => [{ type: 'task.started', time: at(0) }, ...tools.flatMap(([tool, detail], n) => [{ type: 'tool.started', time: at(n + 1), tool, detail: '' }, { type: 'tool.completed', time: at(n + 1), tool, detail }]), { type: 'task.completed', time: at(30) }] as NajdTaskActivity['events']
+  it('is offered for a run that made something, even in one step (the budget workbook made by one script)', () => {
+    expect(skillWorthyRun(run(['najd-python-run', 'completed (exit 0)']))).toBe(true)
+    expect(skillWorthyRun(run(['najd-files-write', 'report.md']))).toBe(true)
+  })
+  it('is not offered for look-ups alone, however many (the news summary of five searches)', () => {
+    expect(skillWorthyRun(run(['najd-skills-read', 'guide'], ['najd-web-search', 'a'], ['najd-web-search', 'b'], ['najd-web-search', 'c'], ['najd-web-search', 'd'], ['najd-web-extract', 'https://x']))).toBe(false)
+  })
+  it('treats looking at a site in the browser as a look-up, and pressing or typing there as making', () => {
+    const browser = (detail: string) => [{ type: 'task.started', time: at(0) }, { type: 'tool.started', time: at(1), tool: 'najd-browser', detail }, { type: 'tool.completed', time: at(2), tool: 'najd-browser', detail: 'ok' }, { type: 'task.completed', time: at(3) }] as NajdTaskActivity['events']
+    expect(skillWorthyRun(browser('open · https://ar.wikipedia.org/wiki/x'))).toBe(false)
+    expect(skillWorthyRun(browser('find · population'))).toBe(false)
+    expect(skillWorthyRun(browser('type · e12'))).toBe(true)
+    expect(skillWorthyRun(browser('click · e4'))).toBe(true)
+  })
+  it('is not offered for an unfinished run or one whose making step failed', () => {
+    const unfinished = run(['najd-python-run', 'completed (exit 0)']).filter(event => event.type !== 'task.completed')
+    expect(skillWorthyRun(unfinished)).toBe(false)
+    expect(skillWorthyRun([{ type: 'tool.started', time: at(1), tool: 'najd-python-run' }, { type: 'tool.failed', time: at(2), tool: 'najd-python-run', detail: 'error' }, { type: 'task.completed', time: at(3) }] as NajdTaskActivity['events'])).toBe(false)
+    expect(skillWorthyRun(undefined)).toBe(false)
+  })
+})
 
 describe('activity view model', () => {
   it('pairs tool starts with their results and measures durations', () => {
@@ -367,5 +391,38 @@ describe('the model thinking and union advice', () => {
     expect(thinking.durationMs).toBe(4000)
     expect(view.counts.tools).toBe(0)
     expect(deriveContext(view).tools).toEqual([])
+  })
+})
+describe('thinking summaries', () => {
+  it('show the provider heading without Markdown markers (owner screenshot 2026-11-09)', () => {
+    const view = buildActivity({ version: 1, startedAt: '2026-11-09T00:00:00.000Z', finishedAt: null, events: [
+      { seq: 1, type: 'task.started', time: '2026-11-09T00:00:00.000Z' },
+      { seq: 2, type: 'reasoning.text', tool: 'najd-plan', detail: '**Planning desktop Chrome search**', time: '2026-11-09T00:00:03.000Z' }] } as never)
+    const steps = view.rows.flatMap(row => row.type === 'event' ? [row.event] : row.group.items)
+    expect(steps.find(step => step.kind === 'thinking')?.summary).toBe('Planning desktop Chrome search')
+  })
+})
+
+describe('run receipt', () => {
+  it('counts confirmed, unconfirmed, failed and declined work steps and leaves out notes and discovery', async () => {
+    const { receiptOf, receiptText } = await import('./activity')
+    const step = (kind: string, status: string) => ({ id: kind + status, kind, title: kind, summary: '', status, startedAt: 0, needsApproval: false }) as never
+    const receipt = receiptOf([step('thinking', 'succeeded'), step('tool', 'succeeded'), step('desktop', 'succeeded'), step('file-write', 'succeeded'), step('desktop', 'unconfirmed'), step('command', 'failed'), step('browser', 'cancelled'), step('approval', 'succeeded')])
+    expect(receipt).toEqual({ confirmed: 2, unconfirmed: 1, failed: 1, declined: 1, total: 5 })
+    expect(receiptText(receipt, 'en')).toBe('2 confirmed · 1 unconfirmed: check before relying on it · 1 failed · 1 not done')
+    expect(receiptText(receipt, 'ar')).toContain('غير مؤكدة')
+    expect(receiptText(receiptOf([step('thinking', 'succeeded')]), 'en')).toBe('')
+  })
+})
+
+describe('resume note', () => {
+  it('lists the work steps a stopped run had taken with their real state, and nothing for a run that did no work', async () => {
+    const { resumeNote } = await import('./activity')
+    const step = (kind: string, status: string, tool: string, summary = '') => ({ id: tool, kind, tool, title: tool, summary, status, startedAt: 0, needsApproval: false }) as never
+    const note = resumeNote([step('thinking', 'succeeded', 'najd-thinking'), step('file-write', 'succeeded', 'najd-files-write', 'report.md'), step('desktop', 'unconfirmed', 'najd-desktop-act', 'click e3')])
+    expect(note).toContain('- najd-files-write (report.md): done')
+    expect(note).toContain('- najd-desktop-act (click e3): effect unknown')
+    expect(note).not.toContain('najd-thinking')
+    expect(resumeNote([step('thinking', 'succeeded', 'najd-thinking')])).toBe('')
   })
 })

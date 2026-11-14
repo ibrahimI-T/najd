@@ -180,3 +180,15 @@ test('a log page made of newlines and quotes is read again smaller until it fits
   const output = JSON.parse(JSON.parse(seen.at(-1)).find(item => item.type === 'function_call_output').output)
   assert.ok(output.text.length > 200 && output.nextOffset > 0 && !output.shortened, 'a real page arrived and the cursor moved')
 })
+
+test('owner 2026-11-09: large windows are balanced, not lean, by default; local models get the full setup without caps', () => {
+  const chatgpt = tierOf(272000 * 3, undefined)
+  assert.equal(chatgpt.lean, false); assert.equal(chatgpt.style, 'balanced'); assert.equal(chatgpt.outputCapChars, Infinity)
+  const local = tierOf(16384 * 3, 'full')
+  assert.equal(local.lean, false); assert.equal(local.style, 'full'); assert.equal(local.outputCapChars, Infinity)
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../electron/main.cjs'), 'utf8')
+  assert.doesNotMatch(source, /contextMode: 'lean' \}/, 'no request is forced lean')
+  // Local models get the full setup when their window has room for it; a small local window follows the window (R-081: the window
+  // is their one limit; live 2026-11-09 a 4K local server could not take the full setup).
+  assert.match(source, /providers\.isLocal\?\.\(request\.provider\) && providers\.inputBudget\(request\.provider, request\.modelName\) >= FULL_LOCAL_MIN \* 3\) request = \{ \.\.\.request, contextMode: 'full' \}/)
+})

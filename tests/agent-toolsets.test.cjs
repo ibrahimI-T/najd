@@ -73,6 +73,10 @@ test('profile selection: pin, then the current request intent and attachments, t
   assert.equal(selectProfile({ text: 'Make an Excel budget sheet' }).profile, 'office')
   assert.equal(selectProfile({ text: 'صمم لي شعار لمقهى' }).profile, 'design')
   assert.equal(selectProfile({ text: 'ابحث لي عن أسعار الآيفون' }).profile, 'research')
+  // News, a price, the weather or a match result start with web search instead of finding the web tools first (daily-use test 2026-11-14).
+  for (const text of ['لخص لي أهم 3 أخبار تقنية عن الذكاء الاصطناعي من هذا الأسبوع', 'كم سعر جرام الذهب عيار 21 اليوم؟', 'وش الطقس في الرياض بكرة؟', 'what is the news on OpenAI', 'weather in Jeddah tomorrow', 'نتيجة مباراة الهلال'])
+    assert.equal(selectProfile({ text }).profile, 'research', text)
+  assert.equal(selectProfile({ text: 'اكتب لي فاتورة بسعر 50 ريال في اكسل' }).profile, 'office', 'an office request that mentions a price stays office')
   assert.equal(selectProfile({ text: 'كيف حالك' }).profile, 'general')
   // Pin wins; the current intent beats the previous profile (AP-003); ambiguous follow-ups keep the previous one.
   assert.equal(selectProfile({ text: 'صمم شعار', pinned: 'coding' }).profile, 'coding')
@@ -239,4 +243,31 @@ test('every profile carries short working-style guidance (token budget)', () => 
     assert.equal(typeof profile.guidance, 'string', name)
     assert.ok(profile.guidance.length > 150 && profile.guidance.length < 1200, name + ' guidance stays short')
   }
+})
+
+test('a request that names Python gets the Python runner from the first call (R-080)', () => {
+  for (const text of ['sum the numbers in data.csv with Python', 'احسب مجموع الأرقام باستخدام بايثون', 'plot it with pandas']) assert.ok(selectProfile({ text }).extra.includes('python'), text)
+  assert.equal(selectProfile({ text: 'write a short poem about the sea' }).extra.includes('python'), false)
+})
+
+test('every toolset has a readiness entry in the runtime, so none can be unloadable by omission (workstation was, 2026-11-09)', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../electron/agent-runtime.cjs'), 'utf8')
+  const start = source.indexOf('const readiness = {'), block = source.slice(start, source.indexOf('\n    }', start))
+  const keys = new Set([...block.matchAll(/(?:^|[\s,{])'?([a-z0-9][a-z0-9-]*)'?:/g)].map(match => match[1]))
+  assert.deepEqual(Object.keys(TOOLSETS).filter(name => !keys.has(name)), [])
+})
+
+test('a web address or a named browser is browsing: the research profile with the browser tools, even when the request says press or type', () => {
+  const { selectProfile } = require('../electron/agent-toolsets.cjs')
+  const pick = text => selectProfile({ text })
+  const form = pick('افتح https://httpbin.org/forms/post في إيدج، واكتب في حقل Customer name القيمة NAJD Test، ثم اضغط زر Submit order')
+  assert.equal(form.profile, 'research'); assert.ok(form.extra.includes('browser'))
+  assert.equal(pick('open edge and search for gold prices').profile, 'research')
+  // A window task still goes to the computer profile, and a coding task with a link stays a coding task.
+  assert.equal(pick('اكتب في خانة Message في نافذة NAJD Live Chat Test ثم اضغط Send').profile, 'computer')
+  assert.equal(pick('اضغط على زر الإرسال في النافذة').profile, 'computer')
+  // Dragging and scrolling in a window are desktop work from the first call (no najd_tools_load round trip).
+  for (const text of ['drag the button onto Drop target in the test window', 'scroll down the list in the window', 'اسحب الزر الى المنطقة المحددة في النافذة', 'مرر القائمة لين تلقى الصف 16']) assert.equal(pick(text).profile, 'computer', text)
+  const coding = pick('fix the bug in https://github.com/x/y/issues/3 and write a unit test')
+  assert.equal(coding.profile, 'coding'); assert.ok(coding.extra.includes('browser'))
 })

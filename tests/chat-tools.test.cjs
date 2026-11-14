@@ -54,7 +54,7 @@ test('Kimi runs the NAJD agent loop: tools are sent, a tool call is executed and
   assert.equal(bodies[1].messages.at(-2).tool_calls[0].id, 'k1'); assert.equal(bodies[2].messages.at(-2).tool_calls[0].id, 'k2')
 })
 
-test('Ollama runs tool turns only for models that declare tools, with a larger context window', async t => {
+test('Ollama runs native tool turns for models that declare tools and the text protocol for the others, in the window Ollama reports', async t => {
   const seen = []
   const server = http.createServer((req, res) => {
     let raw = ''; req.on('data', c => raw += c); req.on('end', () => {
@@ -70,8 +70,11 @@ test('Ollama runs tool turns only for models that declare tools, with a larger c
   const result = await ollama.chat({ modelName: 'qwen-tools', history, agentTurn: { tools: [tool], input: [] } })
   assert.equal(result.kind, 'agent-tools'); assert.equal(result.calls[0].arguments, '{"path":"x.txt"}'); assert.deepEqual(result.usage, { input: 7, output: 3, total: 10, cached: null })
   const chatBody = seen.find(([url]) => url === '/api/chat')[1]
-  assert.equal(chatBody.options.num_ctx, 16384); assert.equal(chatBody.tools[0].function.name, 'najd_files_read')
-  await assert.rejects(ollama.chat({ modelName: 'plain', history, agentTurn: { tools: [tool], input: [] } }), { code: 'TOOLS_NOT_SUPPORTED' })
+  assert.equal(chatBody.options.num_ctx, 8192, 'Ollama reported no window: the conservative estimate'); assert.equal(chatBody.tools[0].function.name, 'najd_files_read')
+  // A model without native tools gets the text protocol (text-tools.cjs): no tools field, the tools described in the prompt.
+  await ollama.chat({ modelName: 'plain', history, agentTurn: { tools: [tool], input: [] } })
+  const plainBody = seen.filter(([url]) => url === '/api/chat').at(-1)[1]
+  assert.equal(plainBody.tools, undefined); assert.match(plainBody.messages[0].content, /^# Tools[\s\S]*- najd_files_read/)
 })
 
 test('M2-R10-002: a vision Ollama model receives a realistic screenshot (base64 past 110,000 characters)', async t => {

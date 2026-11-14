@@ -5,7 +5,23 @@ const { createChatGPTInference } = require('./chatgpt-inference.cjs')
 const { resolveReasoning } = require('./reasoning-policy.cjs')
 const { buildAgentRequest, parseAgentResponse } = require('./provider-agent.cjs')
 const { modelWindow } = require('./model-window.cjs')
+const { agentResult } = require('./chat-tools.cjs')
+const { textTurn, textTurnMessages, parseReply } = require('./text-tools.cjs')
 const modelPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/
+
+// A server refusing pictures says so in words like these (llama.cpp: "image input is not supported - ... mmproj").
+const IMAGE_REFUSAL = /image input|images? (?:are|is) not supported|does not support (?:image|vision)|vision (?:is )?not supported|mmproj|multimodal|image_url/i
+const carriesImages = input => Array.isArray(input) && input.some(item => Array.isArray(item?.content) && item.content.some(part => part?.type === 'input_image'))
+// Pictures replaced by a note the model must pass on, so the user learns why the pictures were not looked at.
+function withoutImages(input) {
+  return input.map(item => {
+    if (!Array.isArray(item?.content) || !item.content.some(part => part?.type === 'input_image')) return item
+    const count = item.content.filter(part => part?.type === 'input_image').length
+    const note = `NAJD_NOTE: the user attached ${count} picture(s), but the selected model cannot see pictures, so they were not sent. Tell the user this in their language at the start of your reply, suggest choosing a model that can see pictures (for example ChatGPT) or describing what the picture shows, then help with the text you have.`
+    const text = item.content.filter(part => part?.type === 'input_text').map(part => part.text)
+    return { ...item, content: [...text, note].map(value => ({ type: 'input_text', text: value })) }
+  })
+}
 
 // baseUrl: the address the owner set for providers with an editable address (OpenAI-compatible services and local servers); otherwise the catalog address.
 function createProviderClient(provider, { fetchImpl = fetch, baseUrl: override } = {}) {
@@ -37,6 +53,20 @@ function createProviderClient(provider, { fetchImpl = fetch, baseUrl: override }
       .filter(m => typeof m.id === 'string' && modelPattern.test(m.id) && !/whisper|tts|embed|moderation/i.test(m.id))
       .map(m => ({ id: m.id, label: typeof m.label === 'string' ? m.label.slice(0, 150) : m.id, contextWindow: modelWindow(m.raw, m.id) }))
   }
+  // Local models that turned out to have no native tool calling on this server (the server rejected the tools field), for this client's life.
+  const textModels = new Set()
+  // Models whose server refused pictures in this run (provider|model); their turns leave pictures out from then on.
+  const noVision = new Set()
+  async function localTextTurn(request, { authHeaders, signal, agentTurn }) {
+    const { tools: _tools, tool_choice: _choice, parallel_tool_calls: _parallel, messages, ...body } = request.body
+    const { message, usage } = await textTurn({ messages: textTurnMessages(messages, agentTurn.tools), tools: agentTurn.tools, send: async list => {
+      const data = await jsonRequest(fetchImpl, request.endpoint, { method: 'POST', headers: authHeaders, body: JSON.stringify({ ...body, messages: list }) }, signal, 3600000, 64 * 1024 * 1024)
+      const choice = data?.choices?.[0]
+      if (!['stop', 'length', 'eos', null, undefined].includes(choice?.finish_reason) || !choice?.message) throw providerError('INVALID_MODEL_OUTPUT')
+      return { message: choice.message, usage: fromChatCompletions(data.usage), cut: choice.finish_reason === 'length' }
+    } })
+    try { return agentResult(message, usage) } catch { throw providerError('INVALID_MODEL_OUTPUT') }
+  }
   async function chat({ apiKey, modelName, history, signal, reasoningEffort = 'auto', readPath, maxOutputTokens = 0, systemPrompt, agentTurn }) {
     validateSystemPrompt(systemPrompt)
     const maxTokens = outputTokenLimit(maxOutputTokens) // 0: no cap is sent, the provider's own maximum applies (Claude requires one, so it gets a high value)
@@ -52,11 +82,48 @@ function createProviderClient(provider, { fetchImpl = fetch, baseUrl: override }
       // The agent tool loop over Chat Completions, Anthropic Messages or Gemini (provider-agent.cjs).
       if (!Array.isArray(agentTurn.input) || !Array.isArray(agentTurn.tools) || agentTurn.tools.length > 24) throw providerError('INVALID_INPUT')
       let request
-      // Pictures the user attaches go to every API model (owner request 2026-10-31); a model that cannot take them is rejected by its provider.
+      // Pictures the user attaches go to every API model (owner request 2026-10-31). A model whose server refuses pictures (a text-only
+      // local model: "image input is not supported", owner's live use 2026-11-10) gets the same turn again without them and a note that
+      // pictures were attached, and is remembered so later turns leave pictures out at once (R-083).
+      const visionKey = provider + '|' + modelName
+      if (noVision.has(visionKey) && carriesImages(agentTurn.input)) agentTurn = { ...agentTurn, input: withoutImages(agentTurn.input) }
       try { request = buildAgentRequest(config, { modelName, systemPrompt, history, agentTurn, vision: config.vision !== false, maxTokens, effort }) }
       catch (error) { throw providerError(error?.code === 'TOOLS_NOT_SUPPORTED' ? 'TOOLS_NOT_SUPPORTED' : 'INVALID_INPUT') }
+      if (carriesImages(agentTurn.input)) {
+        try { return await agentCall(request, agentTurn) }
+        catch (error) {
+          if (error?.code !== 'PROVIDER_REJECTED' || !IMAGE_REFUSAL.test(String(error.detail || ''))) throw error
+          noVision.add(visionKey)
+          agentTurn = { ...agentTurn, input: withoutImages(agentTurn.input) }
+          try { request = buildAgentRequest(config, { modelName, systemPrompt, history, agentTurn, vision: config.vision !== false, maxTokens, effort }) }
+          catch { throw error }
+        }
+      }
+      return agentCall(request, agentTurn)
+    }
+    async function agentCall(request, agentTurn) {
       if (provider === 'openrouter-api') request.body.provider = { allow_fallbacks: false }
-      const data = await jsonRequest(fetchImpl, request.endpoint, { method: 'POST', headers: authHeaders, body: JSON.stringify(request.body) }, signal, 3600000, 64 * 1024 * 1024)
+      // A local OpenAI-compatible server whose model has no native tool calling (llama.cpp without --jinja rejects the tools field; some
+      // templates make the model write the call as text) gets the validated text protocol instead of losing its tools (R-082).
+      const local = config.kind === 'local' && config.protocol === 'chat'
+      if (local && textModels.has(modelName)) return localTextTurn(request, { authHeaders, signal, agentTurn })
+      let data
+      try { data = await jsonRequest(fetchImpl, request.endpoint, { method: 'POST', headers: authHeaders, body: JSON.stringify(request.body) }, signal, 3600000, 64 * 1024 * 1024) }
+      catch (error) {
+        if (!local || error?.code !== 'PROVIDER_REJECTED') throw error
+        // Remembered only when the text protocol works; a rejection for another reason (too long, model not loaded) stays the error.
+        let result
+        try { result = await localTextTurn(request, { authHeaders, signal, agentTurn }) } catch (second) { if (['CANCELLED', 'CONTEXT_LIMIT'].includes(second?.code)) throw second; throw error }
+        textModels.add(modelName)
+        return result
+      }
+      if (local) {
+        const message = data?.choices?.[0]?.message
+        if (message && !message.tool_calls?.length && typeof message.content === 'string' && /<tool_call>|"name"\s*:|<\|tool_call_start\|>|\[TOOL_CALLS\]|<function=|^\s*\[\s*[A-Za-z_][\w-]*\(/.test(message.content)) {
+          const parsed = parseReply(message, agentTurn.tools)
+          if (parsed.message?.tool_calls) return agentResult(parsed.message, fromChatCompletions(data.usage))
+        }
+      }
       try { return parseAgentResponse(config, data) } catch (error) { throw providerError(error?.code === 'INVALID_MODEL_OUTPUT' ? 'INVALID_MODEL_OUTPUT' : 'INVALID_INPUT') }
     }
     const messages = history.map(({ role, text }) => ({ role, content: text }))

@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest'
+import { LangContext } from './workstation/ui'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ChatMessage } from './ChatMessage'
+import { MessageBody } from './workstation/Conversation'
 
-const reply = (text: string) => renderToStaticMarkup(<ChatMessage language="en" message={{ role: 'assistant', createdAt: '', text }} />)
+const reply = (text: string) => renderToStaticMarkup(<LangContext.Provider value="en"><MessageBody text={text} /></LangContext.Provider>)
 
 it('highlights code with a language label and keeps the source escaped', () => {
   const html = reply('```js\nconst x = "<b>"\n```')

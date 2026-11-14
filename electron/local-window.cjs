@@ -37,6 +37,24 @@ async function detectLocalWindow({ baseUrl, fetchImpl = globalThis.fetch, signal
     const loaded = validWindow(item?.loaded_context_length)
     if (loaded && typeof item.id === 'string') found.models[item.id.slice(0, 200)] = loaded
   }
+  if (found.default || Object.keys(found.models).length) return found
+  // Ollama behind its OpenAI-compatible API (live 2026-11-09: it silently cut a request longer than its window): /api/ps gives each loaded
+  // model's running window; a model not loaded yet runs with Ollama's default for this API, 4096 tokens unless the server was set otherwise,
+  // which is what NAJD assumes then (the next probe, after the model loads, reads the real value).
+  const version = await getJson(fetchImpl, base + '/api/version', signal, apiKey).catch(() => null)
+  if (typeof version?.version === 'string') {
+    const running = await getJson(fetchImpl, base + '/api/ps', signal, apiKey).catch(() => null)
+    if (Array.isArray(running?.models)) for (const item of running.models.slice(0, MAX_MODELS)) {
+      const window = validWindow(item?.context_length)
+      if (window && typeof item.name === 'string') found.models[item.name.slice(0, 200)] = window
+    }
+    found.default = 4096
+    return found
+  }
+  // KoboldCpp: /api/extra/true_max_context_length.
+  const kobold = await getJson(fetchImpl, base + '/api/extra/true_max_context_length', signal, apiKey).catch(() => null)
+  const koboldWindow = validWindow(kobold?.value)
+  if (koboldWindow) found.default = koboldWindow
   return found
 }
 

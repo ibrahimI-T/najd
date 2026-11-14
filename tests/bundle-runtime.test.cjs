@@ -177,3 +177,20 @@ test('record entries that escape the component folder are rejected as an unreada
     assert.equal(v2.generations().error, 'GENERATIONS_UNREADABLE', entry)
   }
 })
+
+test('repair unpacks a damaged gateway component again from the packed archive and refuses components it does not manage (owner computer 2026-11-14: files in "cache" folders were missing)', async t => {
+  const { source, target } = await fixture(t, { gateway: { 'entry.mjs': 'E', 'lib/cache/store.js': 'S', 'lib/other.js': 'O' }, beta: { 'b.dll': 'B' } })
+  const runtime = createBundleRuntime({ source, target })
+  await runtime.prepare()
+  const directory = runtime.readyDirectory('gateway')
+  fs.rmSync(path.join(directory, 'lib/cache'), { recursive: true })
+  assert.equal(fs.existsSync(path.join(directory, 'lib/cache/store.js')), false, 'damaged on purpose')
+  assert.equal(runtime.readyDirectory('gateway') !== null, true, 'the marker alone does not notice the loss: that is the gap')
+  await runtime.repair('gateway')
+  assert.equal(runtime.status().state, 'ready')
+  assert.equal(fs.readFileSync(path.join(runtime.readyDirectory('gateway'), 'lib/cache/store.js'), 'utf8'), 'S', 'the missing file is back')
+  assert.equal(fs.readFileSync(path.join(runtime.readyDirectory('gateway'), 'lib/other.js'), 'utf8'), 'O')
+  assert.equal(fs.readdirSync(target).filter(name => name.startsWith('.stage-')).length, 0, 'no staging folder is left behind')
+  await assert.rejects(runtime.repair('beta'), { code: 'INVALID_INPUT' })
+  await assert.rejects(runtime.repair('nope'), { code: 'INVALID_INPUT' })
+})

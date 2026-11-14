@@ -1,7 +1,24 @@
 const fail=code=>Object.assign(new Error(code),{code})
-const {TOOLSETS}=require('./agent-toolsets.cjs')
+const {TOOLSETS,TOOLSET_PURPOSE}=require('./agent-toolsets.cjs')
+// Discovery vocabulary (owner request 2026-11-09): Arabic and everyday words mapped to the English names and descriptions the registry
+// uses, so a request in either language finds the same capability. Each entry adds terms; it never removes the user's own words.
+const SYNONYMS=[
+  [/وورد|ورد|docx?\b|مستند/,['word','docx','document','office']],[/[اإ]كسل|xlsx?\b|جدول بيانات|جداول|spreadsheet/,['excel','xlsx','spreadsheet','office']],
+  [/بوربوينت|باوربوينت|عرض تقديمي|شرائح|pptx?\b|slides?/,['powerpoint','pptx','slides','presentation','office']],[/\bpdf\b|بي دي اف/,['pdf','office']],
+  [/متصفح|موقع|صفحة ويب|browser|website/,['browser','web','page','tab']],[/ابحث|بحث|دور|search|google|جوجل/,['search','web']],
+  [/صور[ةه]?|رسم|ارسم|image|picture|logo|شعار/,['image','media','generate']],[/فيديو|مقطع|video/,['video','media']],[/صوت|تفريغ|audio|transcri/,['audio','transcribe','transcription','voice']],
+  [/ملف|ملفات|مجلد|file|folder/,['file','files','folder']],[/كود|برمج|سكربت|code|coding|program|debug|bug|test/,['code','coding','terminal','files','python','test']],
+  [/بايثون|python/,['python']],[/طرفية|باورشل|أمر|terminal|powershell|command/,['terminal','command','process']],
+  [/ثلاثي|ثري ?دي|بلندر|مجسم|3d|blender|glb/,['3d','blender','model','render']],[/[اأ]ندرويد|جوال|موبايل|apk|android|mobile/,['android','mobile','apk','app']],
+  [/مهار[ةه]|مهارات|skill/,['skill','skills','guide']],[/[اإ]ضاف[ةه]|سوق|plugin|market/,['plugin','market','package','workstation']],[/ذاكر[ةه]|تذكر|memory|remember/,['memory','remember']],
+  [/سطح المكتب|نافذ[ةه]|نوافذ|تطبيق|desktop|window/,['desktop','window','app']],[/شاش[ةه]|لقط[ةه]|screen|screenshot/,['screen','screenshot','capture']],
+  [/جدول[ةه]|موعد|مهم[ةه] مجدول|كل يوم|schedule|remind/,['schedule','task','automation','workstation']],[/لوح[ةه]|dashboard/,['dashboard','workstation']],
+  [/معرف[ةه]|قاعد[ةه] معرف|knowledge/,['knowledge']],[/محادث[ةه] سابق|محادثات|chat history/,['chats','conversation']],[/وكيل فرعي|sub-?agent|delegate/,['delegate','agent']],
+  [/mcp|خادم|server|connector|ربط/,['mcp','server','connection']],[/حساب|احسب|calculate|count|sum|مجموع|نسب[ةه]/,['toolbox','calculate','python']],[/صفح[ةه] html|معاين[ةه]|preview/,['preview','webpreview','html']]
+]
+const expand=query=>{const lower=query.toLowerCase();return [...new Set([...lower.split(/\s+/).filter(Boolean).map(word=>word.replace(/^(ال|وال|بال|لل)(?=\p{L}{3,})/u,'')),...SYNONYMS.filter(([pattern])=>pattern.test(lower)).flatMap(([,terms])=>terms)])]}
 // The toolset to load (najd_tools_load) for a capability row, so the model knows how to reach it.
-const toolsetOf=row=>row.kind==='pack'?'python':row.kind==='mcp-tool'?'mcp':row.kind==='connector'?'connections':row.mode==='instructions'?'skills':row.kind==='tool'?Object.keys(TOOLSETS).find(name=>name!=='files-read'&&TOOLSETS[name].includes(row.id.replaceAll('-','_')))||null:null
+const toolsetOf=row=>row.kind==='toolset'?row.toolsetName:row.kind==='pack'?'python':row.kind==='mcp-tool'?'mcp':row.kind==='connector'?'connections':row.mode==='instructions'?'skills':row.kind==='tool'?Object.keys(TOOLSETS).find(name=>name!=='files-read'&&TOOLSETS[name].includes(row.id.replaceAll('-','_')))||null:null
 const text=(value,size)=>typeof value==='string'?value.slice(0,size):''
 // MCP tool ids are stable, lowercase and unique per server; the exact server/tool names travel in the row.
 const mcpId=(server,tool,taken)=>{let id=('mcp-'+server+'-'+tool.toLowerCase().replace(/[^a-z0-9_]+/g,'-').replace(/^-+|-+$/g,'')).slice(0,72),n=2;while(taken.has(id))id=id.slice(0,70)+'-'+n++;taken.add(id);return id}
@@ -39,6 +56,7 @@ function createAgentCatalog({registry,connectors,getTools=()=>[],getSkills=()=>[
   }
   // Distinct, truthful states: a row is model-executable only when NAJD can run it now.
   function status(row){
+    if(row.kind==='toolset')return 'loadable'
     if(row.kind==='tool')return row.ready?'executable':'dependency-missing'
     if(row.kind==='pack')return row.ready?'ready':row.reason==='NOT_INSTALLED'?'not-installed':row.reason==='INCOMPATIBLE'?'needs-reinstall':row.reason==='DAMAGED'?'damaged':'unavailable'
     if(row.kind==='mcp-tool')return 'executable'
@@ -62,11 +80,13 @@ function createAgentCatalog({registry,connectors,getTools=()=>[],getSkills=()=>[
     list,
     search:async query=>{
       if(typeof query!=='string'||query.length>200)throw fail('INVALID_INPUT')
-      const words=query.toLowerCase().trim().split(/\s+/).filter(Boolean)
+      const words=expand(query.trim())
       // Ranked by how many of the words a row matches (a row with every word first); a long query no longer finds nothing because one word is missing.
-      // Very short words are ignored unless the query has nothing else.
+      // Very short words are ignored unless the query has nothing else. A match in the id or title counts double. Toolsets are rows too,
+      // so a search always tells the model which toolset to load, whatever is loaded now.
       const useful=words.filter(word=>word.length>2),terms=useful.length?useful:words
-      const scored=(await list()).map(row=>{const hay=[row.id,row.title,row.description,row.kind,row.mode||''].join(' ').toLowerCase();return {row,score:terms.filter(word=>hay.includes(word)).length}})
+      const toolsets=Object.keys(TOOLSETS).map(name=>({id:'toolset-'+name,kind:'toolset',title:name+' toolset',description:(TOOLSET_PURPOSE[name]||'')+' · tools: '+TOOLSETS[name].join(', '),installed:true,enabled:true,ready:true,reason:null,toolsetName:name}))
+      const scored=[...(await list()),...toolsets].map(row=>{const head=[row.id,row.title].join(' ').toLowerCase(),hay=[head,row.description,row.kind,row.mode||''].join(' ').toLowerCase();return {row,score:terms.reduce((sum,word)=>sum+(head.includes(word)?2:hay.includes(word)?1:0),0)}})
       const best=Math.max(0,...scored.map(item=>item.score)),floor=Math.max(1,Math.ceil(terms.length/3))
       return scored.filter(item=>item.score>=Math.min(floor,best)&&item.score>0).sort((a,b)=>b.score-a.score||(b.row.learned===true)-(a.row.learned===true)).slice(0,12).map(({row:{inputSchema,...row}})=>({...row,status:status(row),toolset:toolsetOf(row)}))
     },

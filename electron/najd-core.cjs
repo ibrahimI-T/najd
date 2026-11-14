@@ -40,7 +40,7 @@ function validReadPath(value) {
 }
 
 // Tools that can change the world once dispatched; a run stopped while one is open may have changed it already.
-const EFFECTFUL = new Set(['najd-files-write', 'najd-files-edit', 'najd-files-move', 'najd-files-delete', 'najd-terminal-run', 'najd-python-run', 'najd-process-start',
+const EFFECTFUL = new Set(['najd-files-write', 'najd-files-edit', 'najd-files-move', 'najd-files-delete', 'najd-terminal-run', 'najd-python-run', 'najd-blender-run', 'najd-android-build', 'najd-process-start',
   'najd-process-stop', 'najd-desktop-open', 'najd-desktop-act', 'najd-mcp-call', 'najd-mcp-install', 'najd-extension-install', 'najd-image-generate', 'najd-video-generate', 'najd-video-transcribe', 'najd-video-cancel'])
 const effectful = (tool, detail) => EFFECTFUL.has(tool) || tool === 'najd-browser' && /^(click|type|select|login)\b/.test(String(detail || '')) ||
   tool === 'najd-web-preview' && /^interact\b/.test(String(detail || '')) // clicks on a localhost server page
@@ -81,7 +81,7 @@ function createNajdCore({ model, tool, authorizeTool, journal, verifyTool, onRec
   // Run receipts are recorded once per task, whatever the outcome (AP-004); storage errors never fail the task.
   function keepReceipt(task, receipt) {
     if (task.receipt || !receipt || typeof receipt !== 'object') return
-    task.receipt = { outcome: receipt.outcome, profile: receipt.profile, toolsets: receipt.toolsets, usage: receipt.usage, toolCalls: receipt.toolCalls, request: receipt.request }
+    task.receipt = { outcome: receipt.outcome, profile: receipt.profile, toolsets: receipt.toolsets, usage: receipt.usage, toolCalls: receipt.toolCalls, request: receipt.request, tools: receipt.tools, skills: receipt.skills }
     if (typeof onReceipt === 'function' && task.conversationId) {
       // Tracked like task work so flush()/shutdown() wait for it before the app quits (APR-007).
       const write = Promise.resolve().then(() => onReceipt({ runId: task.id, conversationId: task.conversationId, state: task.state, receipt: task.receipt,
@@ -269,8 +269,17 @@ const ALWAYS_ASK = new Set(['najd-mcp-install', 'najd-browser-sensitive', 'najd-
   function startTask({ text, intentId, provider = 'ollama', modelName, history, reasoningEffort = 'auto', assetIds = [], conversationId = null, profile = null, accessMode = 'ask', browserContext = null } = {}, {skillId} = {}) {
     if (!['ask', 'approve', 'full'].includes(accessMode)) throw coreError('INVALID_INPUT')
     // Page details from the browser extension: bounded data that travels beside the owner's question, never inside it.
-    if (browserContext !== null && !(browserContext && typeof browserContext === 'object' && !Array.isArray(browserContext) && Object.keys(browserContext).every(key => ['title', 'url', 'selection'].includes(key)) &&
-      typeof browserContext.title === 'string' && browserContext.title.length <= 200 && typeof browserContext.url === 'string' && browserContext.url.length <= 500 && typeof browserContext.selection === 'string' && browserContext.selection.length <= 2000)) throw coreError('INVALID_INPUT')
+    // The side panel may add the page's visible text, its language and one attached text file.
+    const attachmentOk = value => value === undefined || (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => ['name', 'text'].includes(key)) &&
+      typeof value.name === 'string' && value.name.length <= 120 && typeof value.text === 'string' && value.text.length <= 20000)
+    // Up to three other open tabs the owner named with @ in the panel, each a web address, a title and at most 6000 characters of text.
+    const tabsOk = value => value === undefined || (Array.isArray(value) && value.length >= 1 && value.length <= 3 && value.every(tab => tab && typeof tab === 'object' && !Array.isArray(tab) &&
+      Object.keys(tab).every(key => ['url', 'title', 'text'].includes(key)) && typeof tab.url === 'string' && /^https?:\/\//.test(tab.url) && tab.url.length <= 500 &&
+      typeof tab.title === 'string' && tab.title.length <= 200 && typeof tab.text === 'string' && tab.text.length <= 6000))
+    if (browserContext !== null && !(browserContext && typeof browserContext === 'object' && !Array.isArray(browserContext) && Object.keys(browserContext).every(key => ['title', 'url', 'selection', 'text', 'lang', 'attachment', 'tabs'].includes(key)) &&
+      typeof browserContext.title === 'string' && browserContext.title.length <= 200 && typeof browserContext.url === 'string' && browserContext.url.length <= 500 && typeof browserContext.selection === 'string' && browserContext.selection.length <= 2000 &&
+      (browserContext.text === undefined || (typeof browserContext.text === 'string' && browserContext.text.length <= 12000)) &&
+      (browserContext.lang === undefined || (typeof browserContext.lang === 'string' && /^[a-zA-Z]{0,3}(-[a-zA-Z0-9]{1,8})?$/.test(browserContext.lang))) && attachmentOk(browserContext.attachment) && tabsOk(browserContext.tabs))) throw coreError('INVALID_INPUT')
     if (conversationId !== null && (typeof conversationId !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(conversationId))) throw coreError('INVALID_INPUT')
     if (profile !== null && (typeof profile !== 'string' || !/^[a-z]{2,20}$/.test(profile))) throw coreError('INVALID_INPUT')
     if (!Array.isArray(assetIds) || assetIds.length > 20 || !assetIds.every(id => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id))) throw coreError('INVALID_INPUT')
@@ -448,7 +457,9 @@ const ALWAYS_ASK = new Set(['najd-mcp-install', 'najd-browser-sensitive', 'najd-
   // Drains until nothing is pending: a run finishing during shutdown can still queue its receipt (APR-017).
   async function flush() { while (pending.size) await Promise.allSettled([...pending]); await journal?.flush() }
   function shutdown() { for (const task of tasks.values()) cancelTask(task.id); return flush() }
-  return { startTask, respondApproval, cancelTask, getTask, getEvents, peekApproval, hasActiveTasks, hasActiveTaskFor, flush, shutdown, addNote }
+  // Emergency stop (Ctrl+Alt+Q, 2026-11-10): every task still running is cancelled at once; returns how many were stopped.
+  function cancelAll() { let stopped = 0; for (const task of tasks.values()) if (!['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN_EFFECT'].includes(task.state)) { try { cancelTask(task.id); stopped++ } catch {} } return stopped }
+  return { startTask, respondApproval, cancelTask, getTask, getEvents, peekApproval, hasActiveTasks, hasActiveTaskFor, flush, shutdown, addNote, cancelAll }
 }
 
 module.exports = { createNajdCore }

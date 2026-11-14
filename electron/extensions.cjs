@@ -17,7 +17,14 @@ const BRIDGE = 'mcp-remote'
 const SKILL_SOURCES = [
   { name: 'Anthropic skills', url: 'https://github.com/anthropics/skills' },
   { name: 'OpenAI skills', url: 'https://github.com/openai/skills' },
-  { name: 'Awesome Claude Skills', url: 'https://github.com/ComposioHQ/awesome-claude-skills' }
+  { name: 'Awesome Claude Skills', url: 'https://github.com/ComposioHQ/awesome-claude-skills' },
+  // Added 2026-11-10 (owner request: the best-known agent projects on GitHub). Star counts checked that day through the GitHub API.
+  { name: 'Hermes Agent skills (Nous Research)', url: 'https://github.com/NousResearch/hermes-agent/tree/main/skills' },
+  { name: 'Hermes Agent optional skills', url: 'https://github.com/NousResearch/hermes-agent/tree/main/optional-skills' },
+  { name: 'OpenClaw skills', url: 'https://github.com/openclaw/openclaw/tree/main/skills' },
+  { name: 'Superpowers (obra)', url: 'https://github.com/obra/superpowers' },
+  { name: 'Awesome Agent Skills (VoltAgent)', url: 'https://github.com/VoltAgent/awesome-agent-skills' },
+  { name: 'Agents and plugins (wshobson)', url: 'https://github.com/wshobson/agents' }
 ]
 // The researched developer pack and connectors (docs/research/2026-10-18-agent-capabilities, M4, R-053): suggested when a
 // search is about what they do, with the exact source or the registry search that finds them. A suggestion installs nothing;
@@ -29,6 +36,12 @@ const RECOMMENDED = [
   { kind: 'mcp', title: 'Chrome DevTools', use: 'console, network and performance traces of a web page under development', search: 'chrome devtools', words: ['devtools', 'console', 'performance', 'network', 'debug web'] },
   { kind: 'mcp', title: 'Notion', use: 'pages and databases in the user\'s Notion (needs the user\'s Notion token)', search: 'notion', words: ['notion', 'notes', 'wiki'] },
   { kind: 'mcp', title: 'Figma', use: 'reading designs from the user\'s Figma files (needs the user\'s Figma token)', search: 'figma', words: ['figma', 'design', 'mockup'] },
+  { kind: 'mcp', title: 'Microsoft Learn', use: 'official Microsoft, Azure and .NET documentation (hosted at https://learn.microsoft.com/api/mcp, no account)', search: 'microsoft learn', words: ['microsoft', 'azure', '.net', 'dotnet', 'windows api', 'powershell'] },
+  { kind: 'mcp', title: 'Hugging Face', use: 'models, datasets, Spaces and papers (hosted at https://huggingface.co/mcp, sign-in)', search: 'hugging face', words: ['hugging', 'model', 'dataset', 'paper', 'papers'] },
+  { kind: 'mcp', title: 'Wolfram|Alpha', use: 'exact math, computation and curated facts (hosted at https://agenttools.wolfram.com/mcp)', search: 'wolfram', words: ['math', 'calculate', 'equation', 'wolfram', 'physics', 'integral'] },
+  { kind: 'mcp', title: 'Canva', use: 'create and edit Canva designs (hosted at https://mcp.canva.com/mcp, sign-in)', search: 'canva', words: ['canva', 'poster', 'flyer', 'social post', 'banner'] },
+  { kind: 'skill', title: 'Hermes Agent skills', use: 'the Nous Research skill library: research, productivity, media, devops, software development', repository: 'https://github.com/NousResearch/hermes-agent/tree/main/skills', words: ['research', 'productivity', 'email', 'media', 'devops', 'social', 'note'] },
+  { kind: 'skill', title: 'OpenClaw skills', use: 'the OpenClaw skills: GitHub, Notion, Obsidian, Trello, summarize, weather, Whisper, diagrams', repository: 'https://github.com/openclaw/openclaw/tree/main/skills', words: ['obsidian', 'trello', 'weather', 'summarize', 'whisper', 'diagram', 'notion', 'github'] },
   { kind: 'skill', title: 'Superpowers', use: 'planning, debugging, test-driven development and verification workflows', repository: 'https://github.com/obra/superpowers', words: ['debug', 'debugging', 'plan', 'planning', 'test', 'tdd', 'workflow', 'review'] },
   { kind: 'skill', title: 'Vercel agent skills', use: 'React performance and web interface review', repository: 'https://github.com/vercel-labs/agent-skills', words: ['react', 'next', 'frontend', 'web ui', 'performance'] },
   { kind: 'skill', title: 'Anthropic skills', use: 'frontend design, document skills and building MCP servers (licence per skill)', repository: 'https://github.com/anthropics/skills', words: ['design', 'frontend', 'document', 'mcp', 'skill'] }

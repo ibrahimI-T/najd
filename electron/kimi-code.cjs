@@ -6,7 +6,7 @@ const ENDPOINT = 'https://api.kimi.ai/coding/v1/chat/completions'
 const MODELS = Object.freeze(['kimi-for-coding', 'k3-256k', 'k3', 'kimi-for-coding-highspeed'])
 const MAX_RESPONSE_BYTES = 1024 * 1024
 const { resolveReasoning } = require('./reasoning-policy.cjs')
-const { outputTokenLimit, validateSystemPrompt } = require('./provider-http.cjs')
+const { outputTokenLimit, validateSystemPrompt, rejection } = require('./provider-http.cjs')
 const { chatTools, chatMessages, agentResult } = require('./chat-tools.cjs')
 
 function providerError(code) { return Object.assign(new Error(code), { code }) }
@@ -45,7 +45,8 @@ function createKimiCodeClient({ fetchImpl = fetch, timeoutMs = 3600000 } = {}) {
       })
       if (response.status === 401) throw providerError('PROVIDER_REJECTED')
       if (response.status === 403 || response.status === 429) throw providerError('PROVIDER_RATE_LIMIT')
-      if (!response.ok) throw providerError('PROVIDER_ERROR')
+      // Why Kimi refused (too long, an invalid request) is kept instead of a bare PROVIDER_ERROR (live 2026-11-09, an Excel task).
+      if (!response.ok) throw await rejection(response)
       if (!response.body) throw providerError('INVALID_MODEL_OUTPUT')
       const chunks = []
       let size = 0
@@ -70,7 +71,7 @@ function createKimiCodeClient({ fetchImpl = fetch, timeoutMs = 3600000 } = {}) {
     } catch (error) {
       if (signal?.aborted) throw providerError('CANCELLED')
       if (timeout.aborted) throw providerError('PROVIDER_TIMEOUT')
-      if (['PROVIDER_REJECTED', 'PROVIDER_RATE_LIMIT', 'PROVIDER_ERROR', 'INVALID_MODEL_OUTPUT', 'INVALID_INPUT', 'TOOLS_NOT_SUPPORTED'].includes(error?.code)) throw error
+      if (['PROVIDER_REJECTED', 'PROVIDER_RATE_LIMIT', 'PROVIDER_ERROR', 'CONTEXT_LIMIT', 'INVALID_MODEL_OUTPUT', 'INVALID_INPUT', 'TOOLS_NOT_SUPPORTED'].includes(error?.code)) throw error
       throw providerError('PROVIDER_ERROR')
     }
   }

@@ -22,6 +22,9 @@ static async Task<string?> ReadControlAsync()
 
 // The parent writes UTF-8 JSON lines; without this Windows decodes them with the console code page and Arabic or
 // other non-Latin text typed into windows arrives garbled (owner report 2026-10-19).
+// Per-monitor DPI awareness: UI Automation reports physical pixels, so the pointer NAJD moves and clicks must use the same
+// coordinates on scaled and mixed-scale displays (2026-11-10). -4 is DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2.
+if (OperatingSystem.IsWindows()) try { NativeDpi.SetProcessDpiAwarenessContext(-4); } catch { }
 Console.SetIn(new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false)));
 Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true });
 try
@@ -240,4 +243,9 @@ sealed class ProtocolDiagnosticLogger : IOpenClawLogger
             if (text.Contains(category, StringComparison.OrdinalIgnoreCase))
                 Console.Error.WriteLine($"NODE_REASON_{category.Replace(' ', '_').Replace('-', '_')}");
     }
+}
+
+static class NativeDpi
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(nint value);
 }

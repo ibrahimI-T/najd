@@ -18,8 +18,11 @@ test('Hermes system prompt preserves its role and rejects oversized/mixed tool i
   const baseUrl = await localServer(t, async (req, res) => {
     let raw = ''
     for await (const chunk of req) raw += chunk
+    // NAJD reads the model's window first (owner request 2026-11-09: never assume 16K).
+    if (req.url === '/api/show') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ model_info: { 'qwen3.context_length': 40960 } })); return }
     const body = JSON.parse(raw)
     calls++
+    assert.equal(body.options.num_ctx, 32768, 'the model maximum up to the default cap')
     assert.deepEqual(body.messages, [{ role: 'system', content: 'Bound Hermes instructions' }, { role: 'user', content: 'Plan only' }])
     assert.equal(body.tools, undefined)
     res.setHeader('Content-Type', 'application/json')
@@ -68,6 +71,7 @@ test('lists installed models and sends a bounded chat with history only', async 
       response.end(JSON.stringify({ models: [{ name: 'qwen3:8b' }, { name: 'gemma:latest' }] }))
       return
     }
+    if (incoming.url === '/api/show') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ parameters: ['num_ctx 12288', 'stop "<|im_end|>"'].join(String.fromCharCode(10)), model_info: { 'qwen3.context_length': 40960 } })); return }
     let body = ''
     for await (const chunk of incoming) body += chunk
     request = { url: incoming.url, body: JSON.parse(body) }
@@ -81,7 +85,7 @@ test('lists installed models and sends a bounded chat with history only', async 
   ] })
   assert.deepEqual(result, { kind: 'message', text: 'أهلًا من النموذج المحلي' })
   assert.equal(request.url, '/api/chat')
-  assert.deepEqual(request.body, { model: 'qwen3:8b', stream: false, truncate: false, shift: false, options: {}, messages: [
+  assert.deepEqual(request.body, { model: 'qwen3:8b', stream: false, truncate: false, shift: false, options: { num_ctx: 12288 }, messages: [
     { role: 'user', content: 'مرحبا' }, { role: 'assistant', content: 'أهلًا' }, { role: 'user', content: 'اكمل' }
   ] })
   await client.chat({ modelName: 'qwen3:8b', history: [{ role: 'user', text: 'fixture' }], maxOutputTokens: 512 })
@@ -137,4 +141,15 @@ test('an agent answer cut at the output limit is kept and marked; a cut tool cal
   assert.equal(answer.kind, 'message'); assert.equal(answer.text, 'Python 3.15.2 was released on\n\n[…]')
   payload = { done: true, done_reason: 'length', message: { content: '', tool_calls: [{ function: { name: 'najd_web_search', arguments: { query: 'py' } } }] } }
   await assert.rejects(client.chat(turn), { code: 'INVALID_MODEL_OUTPUT' })
+})
+
+test('the Ollama window follows the Modelfile, then the server setting, then the model maximum, else an estimate (2026-11-09)', () => {
+  const { chooseWindow } = require('../electron/ollama.cjs')
+  const info = { 'llama.context_length': 131072 }
+  assert.deepEqual(chooseWindow({ details: { parameters: 'num_ctx 65536', model_info: info }, env: {} }), { window: 65536, source: 'modelfile', estimated: false, modelMax: 131072 })
+  assert.deepEqual(chooseWindow({ details: { model_info: info }, env: { OLLAMA_CONTEXT_LENGTH: '24576' } }), { window: 24576, source: 'server-setting', estimated: false, modelMax: 131072 })
+  assert.deepEqual(chooseWindow({ details: { model_info: info }, env: {} }), { window: 32768, source: 'model', estimated: false, modelMax: 131072 })
+  assert.deepEqual(chooseWindow({ details: { model_info: { 'phi.context_length': 4096 } }, env: {} }), { window: 4096, source: 'model', estimated: false, modelMax: 4096 })
+  assert.deepEqual(chooseWindow({ details: { parameters: 'num_ctx 999999', model_info: { 'phi.context_length': 4096 } }, env: {} }).window, 4096, 'never above the model maximum')
+  assert.deepEqual(chooseWindow({ details: null, env: {} }), { window: 8192, source: 'fallback', estimated: true, modelMax: null })
 })

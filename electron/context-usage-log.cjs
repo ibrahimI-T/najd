@@ -20,7 +20,7 @@ function createContextUsageLog({ filePath, now = () => Date.now() }) {
   return {
     // entry: { tier, windowTokens, profile, tools, instructionsBytes, toolsBytes, historyBytes, turnBytes, budgetBytes, condensed }
     record: entry => serial(async () => {
-      const line = { at: new Date(now()).toISOString(), tier: String(entry.tier || ''), windowTokens: Number(entry.windowTokens) || null, profile: String(entry.profile || ''),
+      const line = { at: new Date(now()).toISOString(), conversationId: typeof entry.conversationId === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(entry.conversationId) ? entry.conversationId : null, tier: String(entry.tier || ''), windowTokens: Number(entry.windowTokens) || null, profile: String(entry.profile || ''),
         tools: Number(entry.tools) || 0, instructions: tokens(entry.instructionsBytes), toolDefinitions: tokens(entry.toolsBytes), history: tokens(entry.historyBytes),
         taskSoFar: tokens(entry.turnBytes), condensed: Number(entry.condensed) || 0 }
       line.total = line.instructions + line.toolDefinitions + line.history + line.taskSoFar

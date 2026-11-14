@@ -7,8 +7,10 @@ const fs = require('node:fs')
 const { createHash } = require('node:crypto')
 const fail = (code, hint) => Object.assign(new Error(code), { code }, hint ? { hint } : {})
 
-function createSkillSurface({ bundled, external, packs }) {
-  const ownerOf = async id => (await external.has(id)) ? 'external' : packs.has(id) ? 'pack' : 'bundled'
+function createSkillSurface({ bundled, external = null, packs = null, packages = null, legacy = true }) {
+  const useLegacy = legacy !== false && external && packs
+  const externalList = () => useLegacy ? external.list() : Promise.resolve([])
+  const ownerOf = async id => useLegacy && await external.has(id) ? 'external' : useLegacy && packs.has(id) ? 'pack' : 'bundled'
   // A file name the model used for the main guide, or null when it names an auxiliary file.
   const mainAlias = (id, file, row) => {
     if (file === undefined || file === null) return true
@@ -25,28 +27,34 @@ function createSkillSurface({ bundled, external, packs }) {
     return rows.filter(row => words.some(word => row.id.includes(word))).slice(0, 8).map(row => row.id)
   }
   return {
-    list: async () => [...await bundled.list(), ...await external.list()],
-    setEnabled: async (id, enabled) => (await external.has(id) ? external : bundled).setEnabled(id, enabled),
+    list: async () => [...await bundled.list(), ...await externalList(), ...(packages ? await packages.rows() : [])],
+    setEnabled: async (id, enabled) => useLegacy && await external.has(id) ? external.setEnabled(id, enabled) : bundled.setEnabled(id, enabled),
     read: async (id, offset, limit, file) => withNext(await readPage(id, offset, limit, file))
   }
   async function readPage(id, offset, limit, file) {
     if (typeof id !== 'string' || !id.trim()) throw fail('INVALID_INPUT', 'Pass a skill id, for example one named in the instructions.')
     id = id.trim()
+    if (packages) {
+      const rows = await packages.rows()
+      const slug = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+      const row = rows.find(row => row.id === id) || rows.find(row => row.name?.toLowerCase() === id.toLowerCase() || row.id === slug || row.id === 'najd-' + slug)
+      if (row) return packages.read(row.id, offset, limit)
+    }
     // A saved skill's id starts with "my-"; the same name without it means that skill (owner live test 2026-10-31).
-    if (!id.startsWith('my-') && !(await bundled.list()).some(row => row.id === id) && await external.has('my-' + id)) id = 'my-' + id
+    if (useLegacy && !id.startsWith('my-') && !(await bundled.list()).some(row => row.id === id) && await external.has('my-' + id)) id = 'my-' + id
     // A skill named by its display name ("Numbered text file") means the skill with that name or with that name as an id
     // (Kimi acceptance 2026-10-31: the saved skill was first read by its name and refused).
-    const all = [...await bundled.list(), ...await external.list()]
+    const all = [...await bundled.list(), ...await externalList()]
     if (!all.some(row => row.id === id)) {
       const slug = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
       const named = all.find(row => typeof row.name === 'string' && row.name.trim().toLowerCase() === id.toLowerCase()) || all.find(row => slug && (row.id === slug || row.id === 'my-' + slug))
       if (named) id = named.id
     }
     const owner = await ownerOf(id)
-    const rows = owner === 'external' ? await external.list() : await bundled.list()
+    const rows = owner === 'external' ? await externalList() : await bundled.list()
     const row = rows.find(item => item.id === id)
     if (!row) {
-      const near = similar([...await bundled.list(), ...await external.list()], id)
+      const near = similar([...await bundled.list(), ...await externalList()], id)
       throw fail('NOT_FOUND', 'No skill has this id.' + (near.length ? ' Similar ids: ' + near.join(', ') + '.' : ' Search with najd_capabilities_search.'))
     }
     const main = mainAlias(id, file, row)
